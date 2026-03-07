@@ -8,6 +8,7 @@ from models.utils import ConvBNReLU, ReceptiveVit
 from models.vgg import vgg16
 from models.resnet import resnet50, resnet101, resnet152, Bottleneck
 from models.MobileNetV2 import mobilenetv2
+from models.iformer_gapnet import iFormerGapNet
 # try:
 
 from models.vit_fusion import Block
@@ -72,13 +73,46 @@ class GAPNet(nn.Module):
         self.diverse_supervision = diverse_supervision
 
         # if 'mobilenetv2' in arch:
-        enc_channels = [16, 24, 32, 96, 160, last_channel]
-        dec_channels = [16, 40, 40, 40, 40, 40]
+        # Penulis asli menghilangkan if dan memaksa 
+        # penggunaan channel MobileNetV2 secara default.
+        # enc_channels = [16, 24, 32, 96, 160, last_channel]
+        # dec_channels = [16, 40, 40, 40, 40, 40]
 
-        use_dwconv = 'mobilenet' in arch
+        # use_dwconv = 'mobilenet' in arch
 
     
-        self.vit_global = nn.ModuleList([Block(dim=enc_channels[i+4], out_features=enc_channels[-1]) for i in range(2)])
+        # self.vit_global = nn.ModuleList([Block(dim=enc_channels[i+4], out_features=enc_channels[-1]) for i in range(2)])
+
+        # ---------------------------------------
+        if arch == 'iformer_tiny':
+            # Memanggil file wrapper 'models/iformer_gapnet.py'
+            self.backbone = iFormerGapNet(pretrained=pretrained)
+            
+            # iFormer-T mengembalikan 4 list fitur uk [32, 64, 128, 256]
+            # Decoder butuh list channel untuk inisialisasi TransformerDecoder
+            last_channel = 256 
+            enc_channels = [32, 64, 128, 256, last_channel] 
+            dec_channels = [32, 64, 128, 128, 256, 256] # Disesuaikan agar seimbang
+            
+            use_dwconv = True 
+            
+            # iFormer memiliki 5 enc_channels (termasuk last_channel). 
+            # Inisiasi Block() dengan mengambil channel terakhir (-1)
+            self.vit_global = nn.ModuleList([Block(dim=enc_channels[-1], out_features=enc_channels[-1]) for i in range(2)])
+
+        elif 'mobilenet' in arch:
+            self.backbone = eval(arch)(pretrained)
+            enc_channels = [16, 24, 32, 96, 160, last_channel]
+            dec_channels = [16, 40, 40, 40, 40, 40]
+            use_dwconv = True
+            self.vit_global = nn.ModuleList([Block(dim=enc_channels[i+4], out_features=enc_channels[-1]) for i in range(2)])
+            
+        else:
+            self.backbone = eval(arch)(pretrained)
+            use_dwconv = False
+            self.vit_global = nn.ModuleList([Block(dim=enc_channels[i+4], out_features=enc_channels[-1]) for i in range(2)])
+
+        # ---------------------------------------
 
         self.fpn = TransformerDecoder(enc_channels, dec_channels, rec_dwconv=use_dwconv)
 
@@ -150,8 +184,10 @@ class GAPNet(nn.Module):
         # Saliency maps
         saliency_maps = []
         for idx, feature in enumerate(features):
+            pred_layer = getattr(self, 'cls' + str(idx + 1))
             saliency_maps.append(F.interpolate(
-                getattr(self, 'cls' + str(idx + 1))(feature),
+                # getattr(self, 'cls' + str(idx + 1))(feature),
+                pred_layer(feature),
                 input.shape[2:],
                 mode='bilinear',
                 align_corners=False)
