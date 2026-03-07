@@ -184,10 +184,11 @@ class GAPNet(nn.Module):
         # Saliency maps
         saliency_maps = []
         for idx, feature in enumerate(features):
-            pred_layer = getattr(self, 'cls' + str(idx + 1))
+            # pred_layer = getattr(self, 'cls' + str(idx + 1))
+            # Unused experimental
             saliency_maps.append(F.interpolate(
-                # getattr(self, 'cls' + str(idx + 1))(feature),
-                pred_layer(feature),
+                getattr(self, 'cls' + str(idx + 1))(feature),
+                # pred_layer(feature),
                 input.shape[2:],
                 mode='bilinear',
                 align_corners=False)
