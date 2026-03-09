@@ -325,7 +325,8 @@ def train_validate_saliency(args):
         myTransforms.RandomCropResize(int(7./224.*args.width)),
         myTransforms.RandomFlip(),
         # myTransforms.GaussianNoise(),
-        myTransforms.ToTensor(BGR=False)
+        # myTransforms.ToTensor(BGR=False)
+        myTransforms.ToTensor()
     ])
 
     trainDataset_scale1 = myTransforms.Compose([
@@ -333,20 +334,20 @@ def train_validate_saliency(args):
         myTransforms.Scale(320, 320),
         myTransforms.RandomCropResize(int(7./224.*320)),
         myTransforms.RandomFlip(),
-        myTransforms.ToTensor(BGR=False)
+        myTransforms.ToTensor()
     ])
     trainDataset_scale2 = myTransforms.Compose([
         myTransforms.Normalize(*NORMALISE_PARAMS),
         myTransforms.Scale(352, 352),
         myTransforms.RandomCropResize(int(7./224.*352)),
         myTransforms.RandomFlip(),
-        myTransforms.ToTensor(BGR=False)
+        myTransforms.ToTensor()
     ])
 
     valDataset = myTransforms.Compose([
         myTransforms.Normalize(*NORMALISE_PARAMS),
         myTransforms.Scale(args.width, args.height),
-        myTransforms.ToTensor(BGR=False)
+        myTransforms.ToTensor()
     ])
 
     val_names = ["DUTS-TE", "DUT-OMRON", "HKU-IS", "ECSSD", "PASCAL-S"]
