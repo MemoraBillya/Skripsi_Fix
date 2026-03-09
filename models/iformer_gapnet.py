@@ -14,7 +14,7 @@ class iFormerGapNet(nn.Module):
             print(f"Loading iFormer-T pretrained weights from: {pretrained_path}")
             
             # Load file .pth
-            state_dict = torch.load(pretrained_path, map_location='cpu')
+            state_dict = torch.load(pretrained_path, map_location='cpu', weights_only=False)
             
             # Handle jika weight dibungkus dalam key 'model' (umum terjadi pada model timm/DeiT)
             if 'model' in state_dict:
