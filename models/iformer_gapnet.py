@@ -5,7 +5,25 @@ from models.iformer import iFormer_t
 class iFormerGapNet(nn.Module):
     def __init__(self, pretrained=True, args_path=None):
         super(iFormerGapNet, self).__init__()
-        self.backbone = iFormer_t(pretrained=pretrained) #Pretrained
+        # self.backbone = iFormer_t(pretrained=pretrained) #Pretrained
+        self.backbone = iFormer_t(pretrained=False)
+
+        # Load custom pretrained weights jika True
+        if pretrained:
+            pretrained_path = '/kaggle/input/iformer-skripsi/pytorch/default/1/iFormer_t.pth'
+            print(f"Loading iFormer-T pretrained weights from: {pretrained_path}")
+            
+            # Load file .pth
+            state_dict = torch.load(pretrained_path, map_location='cpu')
+            
+            # Handle jika weight dibungkus dalam key 'model' (umum terjadi pada model timm/DeiT)
+            if 'model' in state_dict:
+                state_dict = state_dict['model']
+            elif 'state_dict' in state_dict:
+                state_dict = state_dict['state_dict']
+                
+            # Load state dict ke backbone
+            self.backbone.load_state_dict(state_dict, strict=False)
         
         # Hapus classification head
         if hasattr(self.backbone, 'head'):
