@@ -198,7 +198,7 @@ class ToTensor(object):
         image_tensor = torch.from_numpy(image)
         # TODO: here, we add unsqueeze to satisfy the condition that
         # adjust_size in DataSet.py should input 4D tensor
-        label_tensor =  torch.LongTensor(np.array(label, dtype=np.int)).unsqueeze(dim=0)
+        label_tensor =  torch.LongTensor(np.array(label, dtype=int)).unsqueeze(dim=0)
         if flow is not None:
             flow = flow[:, :, ::-1].copy().transpose((2, 0, 1))
             flow_tensor = torch.from_numpy(flow).float()
