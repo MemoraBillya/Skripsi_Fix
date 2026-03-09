@@ -57,8 +57,6 @@ def conv1x1(in_planes, out_planes, stride=1):
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
-
-
 class GAPNet(nn.Module):
     def __init__(self, arch='mobilenetv2', pretrained=True,
                  enc_channels=[64, 128, 256, 512, 512, 256, 256],
@@ -68,7 +66,7 @@ class GAPNet(nn.Module):
         super(GAPNet, self).__init__()
         
         self.arch = arch
-        self.backbone = eval(arch)(pretrained)
+        # self.backbone = eval(arch)(pretrained)
         self.global_guidance = global_guidance
         self.diverse_supervision = diverse_supervision
 
@@ -92,7 +90,8 @@ class GAPNet(nn.Module):
             # Decoder butuh list channel untuk inisialisasi TransformerDecoder
             last_channel = 256 
             enc_channels = [32, 64, 128, 256, last_channel] 
-            dec_channels = [32, 64, 128, 128, 256, 256] # Disesuaikan agar seimbang
+            # Agar FusionEA dan ReceptiveVit menerima proporsi channel yang seimbang (256 dan 512)
+            dec_channels = [256, 256, 512, 256, 256] 
             
             use_dwconv = True 
             
