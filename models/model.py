@@ -89,7 +89,7 @@ class GAPNet(nn.Module):
             # iFormer-T mengembalikan 4 list fitur uk [32, 64, 128, 256]
             # Decoder butuh list channel untuk inisialisasi TransformerDecoder
             last_channel = 256 
-            enc_channels = [32, 64, 128, 256, last_channel] 
+            enc_channels = [16, 32, 64, 128, 256, last_channel]
             # Biat FusionEA dan ReceptiveVit dapet proporsi channel seimbang
             # dec_channels = [256, 256, 512, 256, 256] # kegedean
             dec_channels = [16, 32, 32, 32, 32, 32]
