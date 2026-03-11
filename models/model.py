@@ -90,8 +90,9 @@ class GAPNet(nn.Module):
             # Decoder butuh list channel untuk inisialisasi TransformerDecoder
             last_channel = 256 
             enc_channels = [32, 64, 128, 256, last_channel] 
-            # Agar FusionEA dan ReceptiveVit menerima proporsi channel yang seimbang (256 dan 512)
-            dec_channels = [256, 256, 512, 256, 256] 
+            # Biat FusionEA dan ReceptiveVit dapet proporsi channel seimbang
+            # dec_channels = [256, 256, 512, 256, 256] # kegedean
+            dec_channels = [16, 32, 32, 32, 32, 32]
             
             use_dwconv = True 
             
