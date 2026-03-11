@@ -466,6 +466,17 @@ def train_validate_saliency(args):
     MAE_val4s = []
     MAE_val5s = []
 
+    # Keprluar Grafik
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    
+    hist_train_loss = []
+    hist_val_loss = []
+    hist_val_fbeta = []
+    hist_val_mae = []
+    # ----
+
     for epoch in range(start_epoch, args.max_epochs):
         # train for one epoch
         if args.ms:
@@ -476,15 +487,27 @@ def train_validate_saliency(args):
             cur_iter += len(trainLoader_scale2)
             torch.cuda.empty_cache()
 
-        train(args, trainLoader_main, model, criteria, optimizer, epoch, max_batches, cur_iter)
+        # UBAHAN
+        # train(args, trainLoader_main, model, criteria, optimizer, epoch, max_batches, cur_iter)
+        # cur_iter += len(trainLoader_main)
+        # torch.cuda.empty_cache()
+
+        loss_train, _, _, _ = train(args, trainLoader_main, model, criteria, optimizer, epoch, max_batches, cur_iter)
+        hist_train_loss.append(loss_train)
         cur_iter += len(trainLoader_main)
         torch.cuda.empty_cache()
+        # -----
 
         # evaluate on validation set
         print("start to evaluate on epoch {}".format(epoch+1))
         import time
         start_time = time.time()
         loss_val, F_beta_val, MAE_val = val(args, valLoader, model, criteria)
+        # TAMBAHAN
+        hist_val_loss.append(loss_val)
+        hist_val_fbeta.append(F_beta_val)
+        hist_val_mae.append(MAE_val)
+        #----
         torch.cuda.empty_cache()
         if epoch > args.max_epochs * 0.5:
             loss_val1, F_beta_val1, MAE_val1 = val(args, valLoader1, model, criteria)
@@ -542,6 +565,44 @@ def train_validate_saliency(args):
         print("Epoch No. %d: \t Val Loss = %.4f\t MAE Loss = %.4f\t F_beta(val) = %.4f\n"
               % (epoch+1, loss_val, MAE_val, F_beta_val))
         torch.cuda.empty_cache()
+    #----
+    # Generate Plots setelah seluruh epoch selesai
+    epochs = range(1, len(hist_train_loss) + 1)
+    
+    # 1. Plot Loss
+    plt.figure(figsize=(8, 6))
+    plt.plot(epochs, hist_train_loss, 'b-', label='Train Loss')
+    plt.plot(epochs, hist_val_loss, 'r-', label='Val Loss')
+    plt.title('Training and Validation Loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(args.savedir + 'curve_loss.png', dpi=300)
+    plt.close()
+
+    # 2. Plot MAE
+    plt.figure(figsize=(8, 6))
+    plt.plot(epochs, hist_val_mae, 'g-', label='Validation MAE')
+    plt.title('Validation MAE over Epochs')
+    plt.xlabel('Epochs')
+    plt.ylabel('MAE')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(args.savedir + 'curve_mae.png', dpi=300)
+    plt.close()
+
+    # 3. Plot F-beta
+    plt.figure(figsize=(8, 6))
+    plt.plot(epochs, hist_val_fbeta, 'm-', label='Validation F-beta')
+    plt.title('Validation F-beta over Epochs')
+    plt.xlabel('Epochs')
+    plt.ylabel('F-beta')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(args.savedir + 'curve_fbeta.png', dpi=300)
+    plt.close()
+    #----
     logger.close()
 
 
