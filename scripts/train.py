@@ -438,9 +438,23 @@ def train_validate_saliency(args):
             betas=(0.9, args.adam_beta2),
             eps=1e-08,
             weight_decay=1e-4)
+    # else:
+    #     optimizer = torch.optim.Adam(model.parameters(), args.lr, (0.9, args.adam_beta2), eps=1e-08, weight_decay=1e-4)
+    # cur_iter = 0
+
     else:
         optimizer = torch.optim.Adam(model.parameters(), args.lr, (0.9, args.adam_beta2), eps=1e-08, weight_decay=1e-4)
-    cur_iter = 0
+        
+    # FIX: Set cur_iter agar menyesuaikan epoch terakhir saat resume
+    cur_iter = start_epoch * max_batches
+    
+    # Load state optimizer dari checkpoint agar momentum Adam tidak hilang
+    if args.resume is not None and os.path.isfile(args.resume):
+        checkpoint = torch.load(args.resume)
+        if 'optimizer' in checkpoint:
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            print("=> Loaded optimizer state from checkpoint")
+    # -----------------------------------------------------------------------------
 
     criteria = CrossEntropyLoss
     if args.bcedice:
