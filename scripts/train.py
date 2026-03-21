@@ -168,7 +168,10 @@ def val(args, val_loader, model, criterion):
         output = model(input_var)
         
         # Hitung Val Loss asli
-        loss = criterion(output, target_var) / args.iter_size
+        # loss = criterion(output, target_var) / args.iter_size
+        # epoch_loss.append(loss.item())
+
+        loss = criterion.criterion(output[:, 0, :, :], target_var) / args.iter_size
         epoch_loss.append(loss.item())
 
         # F-beta & MAE
