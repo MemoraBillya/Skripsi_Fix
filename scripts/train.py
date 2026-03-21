@@ -17,6 +17,7 @@ import torch.optim.lr_scheduler
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
+import py_sod_metrics as M
 
 
 def BCEDiceLoss(inputs, targets, ignore_index=False):
@@ -121,35 +122,79 @@ class CEOLoss(nn.Module):
         return sum(loss_overall)/len(loss_overall)*3
 
 
+# @torch.no_grad()
+# def val(args, val_loader, model, criterion):
+#     # switch to evaluation mode
+#     model.eval()
+#     sal_eval_val = SalEval()
+#     epoch_loss = []
+#     total_batches = len(val_loader)
+
+#     for iter, (input, target) in enumerate(tqdm(val_loader)):
+#         start_time = time.time()
+#         input = input.to(device)
+#         target = target.to(device)
+#         input_var = torch.autograd.Variable(input)
+#         target_var = torch.autograd.Variable(target).float()
+
+#         # run the model
+#         output = model(input_var)
+
+#         time_taken = time.time() - start_time
+
+#         epoch_loss.append(0)
+#         # For validation, we use the original label (not processed)
+#         sal_eval_val.add_batch(output[:, 0, :, :],  target_var)
+
+#     average_epoch_loss_val = sum(epoch_loss) / len(epoch_loss)
+#     F_beta, MAE = sal_eval_val.get_metric()
+
+#     return average_epoch_loss_val, F_beta, MAE
+
 @torch.no_grad()
 def val(args, val_loader, model, criterion):
-    # switch to evaluation mode
     model.eval()
     sal_eval_val = SalEval()
+    SM = M.Smeasure()
+    EM = M.Emeasure()
+    
     epoch_loss = []
-    total_batches = len(val_loader)
+    bar = tqdm(val_loader, desc="Validating")
 
-    for iter, (input, target) in enumerate(tqdm(val_loader)):
-        start_time = time.time()
-        input = input.to(device)
-        target = target.to(device)
-        input_var = torch.autograd.Variable(input)
-        target_var = torch.autograd.Variable(target).float()
+    for iter, (input, target) in enumerate(bar):
+        input_var = input.to(device)
+        target_var = target.to(device).float()
 
-        # run the model
         output = model(input_var)
+        
+        # Hitung Val Loss asli
+        loss = criterion(output, target_var) / args.iter_size
+        epoch_loss.append(loss.item())
 
-        time_taken = time.time() - start_time
+        # F-beta & MAE
+        sal_eval_val.add_batch(output[:, 0, :, :], target_var)
+        
+        # S-Measure & E-Measure
+        preds = (output[:, 0, :, :].squeeze(1).cpu().numpy() * 255).astype(np.uint8)
+        gts = target_var.cpu().numpy().astype(np.uint8)
+        
+        if len(preds.shape) == 2:
+            preds = np.expand_dims(preds, axis=0)
+            gts = np.expand_dims(gts, axis=0)
+            
+        for i in range(preds.shape[0]):
+            SM.step(preds[i], gts[i])
+            EM.step(preds[i], gts[i])
 
-        epoch_loss.append(0)
-        # For validation, we use the original label (not processed)
-        sal_eval_val.add_batch(output[:, 0, :, :],  target_var)
+        if iter % 10 == 0:
+            bar.set_description(f"Val Loss: {sum(epoch_loss) / len(epoch_loss):.5f}")
 
     average_epoch_loss_val = sum(epoch_loss) / len(epoch_loss)
     F_beta, MAE = sal_eval_val.get_metric()
+    S_measure = SM.get_results()['sm']
+    E_measure = EM.get_results()['em']['curve'].max()
 
-    return average_epoch_loss_val, F_beta, MAE
-
+    return average_epoch_loss_val, F_beta, MAE, S_measure, E_measure
 
 def train(args, train_loader, model, criterion, optimizer, epoch, max_batches, cur_iter=0):
     # switch to train mode
@@ -489,64 +534,149 @@ def train_validate_saliency(args):
     hist_val_loss = []
     hist_val_fbeta = []
     hist_val_mae = []
+    hist_val_smeasure = []
+    hist_val_emeasure = []
     # ----
 
     for epoch in range(start_epoch, args.max_epochs):
+        loss_train_s1 = loss_train_s2 = 0.0
         # train for one epoch
+        # if args.ms:
+        #     train(args, trainLoader_scale1, model, criteria, optimizer, epoch, max_batches, cur_iter)
+        #     cur_iter += len(trainLoader_scale1)
+        #     torch.cuda.empty_cache()
+        #     train(args, trainLoader_scale2, model, criteria, optimizer, epoch, max_batches, cur_iter)
+        #     cur_iter += len(trainLoader_scale2)
+        #     torch.cuda.empty_cache()
+
+        # # UBAHAN
+        # # train(args, trainLoader_main, model, criteria, optimizer, epoch, max_batches, cur_iter)
+        # # cur_iter += len(trainLoader_main)
+        # # torch.cuda.empty_cache()
+
+        # loss_train, _, _, _ = train(args, trainLoader_main, model, criteria, optimizer, epoch, max_batches, cur_iter)
+        # hist_train_loss.append(loss_train)
+        # cur_iter += len(trainLoader_main)
+        # torch.cuda.empty_cache()
+        # # -----
+        # NEW
+        # 1. Training Skala Kecil (S1 & S2)
         if args.ms:
-            train(args, trainLoader_scale1, model, criteria, optimizer, epoch, max_batches, cur_iter)
+            loss_train_s1, _, _, _ = train(args, trainLoader_scale1, model, criteria, optimizer, epoch, max_batches, cur_iter)
             cur_iter += len(trainLoader_scale1)
             torch.cuda.empty_cache()
-            train(args, trainLoader_scale2, model, criteria, optimizer, epoch, max_batches, cur_iter)
+            
+            loss_train_s2, _, _, _ = train(args, trainLoader_scale2, model, criteria, optimizer, epoch, max_batches, cur_iter)
             cur_iter += len(trainLoader_scale2)
             torch.cuda.empty_cache()
 
-        # UBAHAN
-        # train(args, trainLoader_main, model, criteria, optimizer, epoch, max_batches, cur_iter)
-        # cur_iter += len(trainLoader_main)
-        # torch.cuda.empty_cache()
-
-        loss_train, _, _, _ = train(args, trainLoader_main, model, criteria, optimizer, epoch, max_batches, cur_iter)
-        hist_train_loss.append(loss_train)
+        # 2. Training Skala Utama (Main Scale 384x384)
+        loss_train_main, _, _, _ = train(args, trainLoader_main, model, criteria, optimizer, epoch, max_batches, cur_iter)
+        hist_train_loss.append(loss_train_main) # HANYA Main Scale yang masuk grafik
         cur_iter += len(trainLoader_main)
         torch.cuda.empty_cache()
-        # -----
 
+        # 3. Evaluasi Validasi
+        print(f"\nStart to evaluate on epoch {epoch+1}")
+        loss_val, F_beta_val, MAE_val, S_m_val, E_m_val = val(args, valLoader, model, criteria)
+        
+        hist_val_loss.append(loss_val)
+        hist_val_fbeta.append(F_beta_val)
+        hist_val_mae.append(MAE_val)
+        hist_val_smeasure.append(S_m_val)
+        hist_val_emeasure.append(E_m_val)
+        torch.cuda.empty_cache()
+
+        # 4. Simpan Checkpoint
+        torch.save({
+            'epoch': epoch + 1,
+            'arch': str(model),
+            'state_dict': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'loss_val': loss_val,
+            'iou_val': F_beta_val,
+        }, args.savedir + 'checkpoint.pth.tar')
+
+        if epoch > args.max_epochs * 0.5:
+            model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
+            torch.save(model.state_dict(), model_file_name)
+
+        # 5. Penulisan Log yang Bersih (Tanpa Duplikasi)
+        log_str = f"Epoch {epoch+1:03d}\tTr_Loss(s1,s2,main): {loss_train_s1:.4f}, {loss_train_s2:.4f}, {loss_train_main:.4f}\tVal_Loss: {loss_val:.4f}\tF_beta: {F_beta_val:.4f}\tMAE: {MAE_val:.4f}\tS_m: {S_m_val:.4f}\tE_m: {E_m_val:.4f}"
+        logger.write(log_str + "\n")
+        logger.flush()
+        
+        print(f"Epoch {epoch+1} Results -> Train Loss Main: {loss_train_main:.4f} | Val Loss: {loss_val:.4f} | MAE: {MAE_val:.4f} | F_beta: {F_beta_val:.4f} | S-m: {S_m_val:.4f} | E-m: {E_m_val:.4f}\n")
+
+        # NEW END
         # evaluate on validation set
         print("start to evaluate on epoch {}".format(epoch+1))
         import time
         start_time = time.time()
-        loss_val, F_beta_val, MAE_val = val(args, valLoader, model, criteria)
-        # TAMBAHAN
+        # loss_val, F_beta_val, MAE_val = val(args, valLoader, model, criteria)
+        # # TAMBAHAN
+        # hist_val_loss.append(loss_val)
+        # hist_val_fbeta.append(F_beta_val)
+        # hist_val_mae.append(MAE_val)
+
+        # Tangkap 5 nilai dari fungsi val()
+        loss_val, F_beta_val, MAE_val, S_measure_val, E_measure_val = val(args, valLoader, model, criteria)
+        
         hist_val_loss.append(loss_val)
         hist_val_fbeta.append(F_beta_val)
         hist_val_mae.append(MAE_val)
+        # Jika Anda membuat list hist_val_smeasure & hist_val_emeasure di luar loop:
+        # hist_val_smeasure.append(S_measure_val)
+        # hist_val_emeasure.append(E_measure_val)
+        
+        torch.cuda.empty_cache()
+
+        # Simpan Checkpoint
+        torch.save({
+            'epoch': epoch + 1,
+            'arch': str(model),
+            'state_dict': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'loss_val': loss_val,
+            'f_val': F_beta_val,
+        }, args.savedir + 'checkpoint.pth.tar')
+
+        if epoch > args.max_epochs * 0.5:
+            model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
+            torch.save(model.state_dict(), model_file_name)
+
+        # --- FIX 4: PENULISAN LOG BERSIH & TIDAK BERULANG ---
+        log_str = f"Epoch {epoch+1:03d}\tTr_Loss: {loss_train:.4f}\tVal_Loss: {loss_val:.4f}\tF_beta: {F_beta_val:.4f}\tMAE: {MAE_val:.4f}\tS_m: {S_measure_val:.4f}\tE_m: {E_measure_val:.4f}"
+        logger.write(log_str + "\n")
+        logger.flush()
+        
+        print(f"Epoch {epoch+1} Results -> Val Loss: {loss_val:.4f} | MAE: {MAE_val:.4f} | F_beta: {F_beta_val:.4f} | S-measure: {S_measure_val:.4f} | E-measure: {E_measure_val:.4f}\n")
         #----
         torch.cuda.empty_cache()
-        if epoch > args.max_epochs * 0.5:
-            loss_val1, F_beta_val1, MAE_val1 = val(args, valLoader1, model, criteria)
-            torch.cuda.empty_cache()
-            loss_val2, F_beta_val2, MAE_val2 = val(args, valLoader2, model, criteria)
-            torch.cuda.empty_cache()
-            loss_val3, F_beta_val3, MAE_val3 = val(args, valLoader3, model, criteria)
-            torch.cuda.empty_cache()
-            loss_val4, F_beta_val4, MAE_val4 = val(args, valLoader4, model, criteria)
-            torch.cuda.empty_cache()
-            # loss_val5, F_beta_val5, MAE_val5 = val(args, valLoader5, model, criteria)
-            F_beta_val5, MAE_val5 = 0, 0
-            F_beta_vals.append(F_beta_val)
-            F_beta_val1s.append(F_beta_val1)
-            F_beta_val2s.append(F_beta_val2)
-            F_beta_val3s.append(F_beta_val3)
-            F_beta_val4s.append(F_beta_val4)
-            F_beta_val5s.append(F_beta_val5)
-            MAE_vals.append(MAE_val)
-            MAE_val1s.append(MAE_val1)
-            MAE_val2s.append(MAE_val2)
-            MAE_val3s.append(MAE_val3)
-            MAE_val4s.append(MAE_val4)
-            MAE_val5s.append(MAE_val5)
-            epoch_idxes.append(epoch+1)
+        # if epoch > args.max_epochs * 0.5:
+        #     loss_val1, F_beta_val1, MAE_val1 = val(args, valLoader1, model, criteria)
+        #     torch.cuda.empty_cache()
+        #     loss_val2, F_beta_val2, MAE_val2 = val(args, valLoader2, model, criteria)
+        #     torch.cuda.empty_cache()
+        #     loss_val3, F_beta_val3, MAE_val3 = val(args, valLoader3, model, criteria)
+        #     torch.cuda.empty_cache()
+        #     loss_val4, F_beta_val4, MAE_val4 = val(args, valLoader4, model, criteria)
+        #     torch.cuda.empty_cache()
+        #     # loss_val5, F_beta_val5, MAE_val5 = val(args, valLoader5, model, criteria)
+        #     F_beta_val5, MAE_val5 = 0, 0
+        #     F_beta_vals.append(F_beta_val)
+        #     F_beta_val1s.append(F_beta_val1)
+        #     F_beta_val2s.append(F_beta_val2)
+        #     F_beta_val3s.append(F_beta_val3)
+        #     F_beta_val4s.append(F_beta_val4)
+        #     F_beta_val5s.append(F_beta_val5)
+        #     MAE_vals.append(MAE_val)
+        #     MAE_val1s.append(MAE_val1)
+        #     MAE_val2s.append(MAE_val2)
+        #     MAE_val3s.append(MAE_val3)
+        #     MAE_val4s.append(MAE_val4)
+        #     MAE_val5s.append(MAE_val5)
+        #     epoch_idxes.append(epoch+1)
 
         print("elapsed evaluation time: {} hours".format((time.time()-start_time)/3600.0))
         torch.cuda.empty_cache()
@@ -585,7 +715,7 @@ def train_validate_saliency(args):
     
     # 1. Plot Loss
     plt.figure(figsize=(8, 6))
-    plt.plot(epochs, hist_train_loss, 'b-', label='Train Loss')
+    plt.plot(epochs, hist_train_loss, 'b-', label='Train Loss (Main Scale)')
     plt.plot(epochs, hist_val_loss, 'r-', label='Val Loss')
     plt.title('Training and Validation Loss')
     plt.xlabel('Epochs')
@@ -608,16 +738,19 @@ def train_validate_saliency(args):
 
     # 3. Plot F-beta
     plt.figure(figsize=(8, 6))
-    plt.plot(epochs, hist_val_fbeta, 'm-', label='Validation F-beta')
-    plt.title('Validation F-beta over Epochs')
+    plt.plot(epochs, hist_val_fbeta, 'm-', label='F-beta')
+    plt.plot(epochs, hist_val_smeasure, 'c-', label='S-measure')
+    plt.plot(epochs, hist_val_emeasure, 'y-', label='E-measure')
+    plt.title('Validation Metrics over Epochs')
     plt.xlabel('Epochs')
-    plt.ylabel('F-beta')
+    plt.ylabel('Score')
     plt.legend()
     plt.grid(True)
-    plt.savefig(args.savedir + 'curve_fbeta.png', dpi=300)
+    plt.savefig(args.savedir + 'curve_metrics.png', dpi=300)
     plt.close()
-    #----
+    
     logger.close()
+    #----
 
 
 if __name__ == '__main__':
