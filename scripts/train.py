@@ -171,15 +171,19 @@ def val(args, val_loader, model, criterion):
         # loss = criterion(output, target_var) / args.iter_size
         # epoch_loss.append(loss.item())
 
-        loss = criterion.criterion(output[:, 0, :, :], target_var) / args.iter_size
+        # --- FIX: Squeeze target_var agar dimensinya 3D [Batch, H, W] ---
+        target_squeezed = target_var.squeeze(1) 
+
+        # Hitung Val Loss
+        loss = criterion.criterion(output[:, 0, :, :], target_squeezed) / args.iter_size
         epoch_loss.append(loss.item())
 
-        # F-beta & MAE
+        # F-beta & MAE (Tetap pakai target_var asli untuk SalEval)
         sal_eval_val.add_batch(output[:, 0, :, :], target_var)
         
-        # S-Measure & E-Measure
-        preds = (output[:, 0, :, :].squeeze(1).cpu().numpy() * 255).astype(np.uint8)
-        gts = target_var.cpu().numpy().astype(np.uint8)
+        # S-Measure & E-Measure (Gunakan target_squeezed agar PySODMetrics tidak error)
+        preds = (output[:, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
+        gts = target_squeezed.cpu().numpy().astype(np.uint8)
         
         if len(preds.shape) == 2:
             preds = np.expand_dims(preds, axis=0)
