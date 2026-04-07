@@ -1,18 +1,11 @@
+%%writefile /kaggle/working/Skripsi_Fix/scripts/evaluate_metrics.py
 import os
-import glob
-
-# Pastikan library terinstall
-os.system("pip install py_sod_metrics -q")
-
-# 1. BUAT FILE EVALUASI DENGAN AMAN MENGGUNAKAN PYTHON (Tanpa magic command)
-eval_script_content = r'''import os
 import cv2
 import torch
 import numpy as np
 import torch.nn.functional as F
 from argparse import ArgumentParser
 import py_sod_metrics as M
-
 from models import model as net
 
 @torch.no_grad()
@@ -49,7 +42,6 @@ def evaluate_model(args):
     mean = np.array([0.406, 0.456, 0.485], dtype=np.float32).reshape(1, 1, 3)
     std = np.array([0.225, 0.224, 0.229], dtype=np.float32).reshape(1, 1, 3)
 
-    # Menghapus tqdm agar isi log .txt menjadi bersih
     print("Memproses evaluasi citra, mohon tunggu...")
     for idx in range(len(image_list)):
         image = cv2.imread(image_list[idx])
@@ -110,48 +102,3 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     evaluate_model(args)
-'''
-
-# Tulis ulang file evaluate_metrics.py dengan aman
-os.makedirs('/kaggle/working/Skripsi_Fix/scripts', exist_ok=True)
-with open('/kaggle/working/Skripsi_Fix/scripts/evaluate_metrics.py', 'w') as f:
-    f.write(eval_script_content)
-print("✅ File evaluate_metrics.py berhasil diperbaiki.")
-
-
-# 2. PROSES EVALUASI 9 MODEL
-models_dir = '/kaggle/input/datasets/sejutakerinduan/best-set-skripsi/'
-pth_files = glob.glob(os.path.join(models_dir, '*.pth'))
-pth_files.sort()
-
-if not pth_files:
-    print(f"❌ Tidak ada file .pth yang ditemukan di {models_dir}")
-else:
-    print(f"✅ Ditemukan {len(pth_files)} model. Memulai evaluasi komprehensif...\n")
-
-data_dir = '/kaggle/working/data/'
-partisi_val = '/kaggle/input/datasets/billydawson/partisi-train/DUTS-TR_val_20.txt' 
-output_txt = '/kaggle/working/hasil_evaluasi_skripsi.txt'
-
-# Buat ulang header file txt
-with open(output_txt, 'w') as f:
-    f.write("==================================================\n")
-    f.write("   REKAP HASIL EVALUASI METRIK 9 MODEL TERBAIK    \n")
-    f.write("==================================================\n\n")
-
-for pth_file in pth_files:
-    print(f"🔄 Menguji model: {os.path.basename(pth_file)} (Mohon tunggu, proses memakan waktu lebih lama sekarang)")
-    
-    command = f"""
-    cd /kaggle/working/Skripsi_Fix && PYTHONPATH=. python scripts/evaluate_metrics.py \
-        --data_dir {data_dir} \
-        --val_list {partisi_val} \
-        --pretrained "{pth_file}" \
-        --width 384 \
-        --height 384 >> {output_txt} 2>&1
-    """
-    
-    os.system(command)
-
-print(f"\n✅ Evaluasi Selesai!")
-print(f"📁 Semua hasil metrik telah berhasil disimpan ke: {output_txt}")
