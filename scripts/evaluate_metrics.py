@@ -1,4 +1,3 @@
-%%writefile /kaggle/working/Skripsi_Fix/scripts/evaluate_metrics.py
 import os
 import cv2
 import torch
@@ -28,6 +27,11 @@ def evaluate_model(args):
     with open(args.val_list, 'r') as f:
         for line in f:
             img_path, gt_path = line.strip().split()
+            
+            # Bersihkan slash agar gabungan path akurat
+            img_path = img_path.lstrip('/')
+            gt_path = gt_path.lstrip('/')
+            
             image_list.append(os.path.join(args.data_dir, img_path))
             label_list.append(os.path.join(args.data_dir, gt_path))
             
@@ -46,6 +50,9 @@ def evaluate_model(args):
     for idx in range(len(image_list)):
         image = cv2.imread(image_list[idx])
         gt = cv2.imread(label_list[idx], cv2.IMREAD_GRAYSCALE)
+        
+        if image is None or gt is None:
+            raise FileNotFoundError(f"🚨 Gagal memuat gambar atau label!\nPastikan path ini ada:\n- {image_list[idx]}\n- {label_list[idx]}")
         
         orig_shape = image.shape[:2]
         
