@@ -114,10 +114,17 @@ def main(args, file_list, is_first_run=False):
         list_path = osp.join(args.data_dir, file_list + '.lst')
         
     with open(list_path) as fid:
+        # for line in fid:
+        #     line_arr = line.split()
+        #     image_list.append(osp.join(args.data_dir, line_arr[0].strip()))
+        #     label_list.append(osp.join(args.data_dir, line_arr[1].strip()))
         for line in fid:
             line_arr = line.split()
-            image_list.append(osp.join(args.data_dir, line_arr[0].strip()))
-            label_list.append(osp.join(args.data_dir, line_arr[1].strip()))
+            # FIX: Hapus '/' berlebih di awal string agar path tersambung sempurna
+            img_path = args.data_dir.rstrip('/') + '/' + line_arr[0].strip().lstrip('/')
+            lbl_path = args.data_dir.rstrip('/') + '/' + line_arr[1].strip().lstrip('/')
+            image_list.append(img_path)
+            label_list.append(lbl_path)
 
     model = net.GAPNet(arch=args.arch)
     
