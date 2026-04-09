@@ -130,10 +130,26 @@ def main(args, file_list, is_first_run=False):
         
     state_dict = torch.load(args.pretrained, map_location='cpu')
 
+    # if 'state_dict' in state_dict:
+    #     model.load_state_dict(state_dict['state_dict'], strict=True)
+    # else:
+    #     model.load_state_dict(state_dict, strict=True)
+
+    # 1. Ambil state_dict asli (baik dari checkpoint maupun file model langsung)
     if 'state_dict' in state_dict:
-        model.load_state_dict(state_dict['state_dict'], strict=True)
+        actual_state_dict = state_dict['state_dict']
     else:
-        model.load_state_dict(state_dict, strict=True)
+        actual_state_dict = state_dict
+
+    # 2. Bersihkan prefix 'module.' bawaan DataParallel (Multi-GPU Training)
+    cleaned_state_dict = {}
+    for k, v in actual_state_dict.items():
+        # Jika nama kunci berawalan 'module.', potong 7 karakter pertamanya
+        name = k[7:] if k.startswith('module.') else k 
+        cleaned_state_dict[name] = v
+
+    # 3. Load bobot yang sudah dibersihkan ke dalam model
+    model.load_state_dict(cleaned_state_dict, strict=True)
 
     model = model.to(device)
     model.eval()
