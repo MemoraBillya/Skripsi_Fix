@@ -11,6 +11,7 @@ from argparse import ArgumentParser
 from models import model as net
 from tqdm import tqdm
 import py_sod_metrics as M
+import shutil
 
 # WAJIB IMPORT INI UNTUK MENGHITUNG FLOPS (Bawaan asli kode Anda)
 from fvcore.nn import FlopCountAnalysis
@@ -249,6 +250,30 @@ if __name__ == '__main__':
 
     print("="*85)
     print(f"✅ Saliency Maps dan CSV Skor Per-Gambar telah disimpan di: {args.savedir}")
+
+    # =========================================================================
+    # PROSES ZIP OUTPUT
+    # =========================================================================
+    print("\n📦 Memulai proses zipping folder output...")
+    
+    # Nama file zip yang akan dibuat (tanpa ekstensi .zip)
+    zip_name = args.savedir.rstrip('/') 
+    
+    try:
+        # Mengkompres folder args.savedir menjadi zip
+        # Format: shutil.make_archive(nama_file_zip, 'zip', folder_sumber)
+        shutil.make_archive(zip_name, 'zip', args.savedir)
+        print(f"✔️ Berhasil! File zip tersedia di: {zip_name}.zip")
+        
+        # OPSIONAL: Hapus folder asli setelah di-zip agar hemat ruang disk Kaggle
+        # Kaggle memiliki batas kuota disk di /kaggle/working/
+        shutil.rmtree(args.savedir)
+        print(f"🗑️  Folder asli '{args.savedir}' telah dihapus untuk menghemat ruang.")
+        
+    except Exception as e:
+        print(f"❌ Gagal membuat zip: {str(e)}")
+
+    print("="*85)
 
 # -------------------------------------
 # ORIGINAL SCRIPT
