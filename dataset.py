@@ -16,13 +16,25 @@ class Dataset(torch.utils.data.Dataset):
         self.msk_list = list()
         self.flow_list = list()
         self.use_flow = use_flow
-        with open(data_dir + dataset + '.lst', 'r') as lines:
-            for line in lines:
-                line_arr = line.split()
-                self.img_list.append(data_dir + line_arr[0].strip())
-                self.msk_list.append(data_dir +  line_arr[-1].strip())
-                if self.use_flow:
-                    self.flow_list.append(data_dir + line_arr[1].strip())
+
+        # ==============================================================================================
+        lists = dataset.split(',')
+        for l in lists:
+            with open(data_dir + l.strip() + '.lst', 'r') as lines:
+                for line in lines:
+                    line_arr = line.split()
+                    self.img_list.append(data_dir + line_arr[0].strip())
+                    self.msk_list.append(data_dir + line_arr[-1].strip())
+                    if use_flow: self.flow_list.append(data_dir + line_arr[1].strip())
+
+        # ================================================================================================
+        # with open(data_dir + dataset + '.lst', 'r') as lines:
+        #     for line in lines:
+        #         line_arr = line.split()
+        #         self.img_list.append(data_dir + line_arr[0].strip())
+        #         self.msk_list.append(data_dir +  line_arr[-1].strip())
+        #         if self.use_flow:
+        #             self.flow_list.append(data_dir + line_arr[1].strip())
 
     def __len__(self):
         return len(self.img_list)
