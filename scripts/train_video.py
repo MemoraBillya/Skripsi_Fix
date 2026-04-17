@@ -190,6 +190,22 @@ def train_video_saliency(args):
         myTransforms.ToTensor()
     ])
 
+    trainDataset_scale1 = myTransforms.Compose([
+        myTransforms.Normalize(*NORMALISE_PARAMS),
+        myTransforms.Scale(320, 320),
+        myTransforms.RandomCropResize(int(7./224.*320)),
+        myTransforms.RandomFlip(),
+        myTransforms.ToTensor()
+    ])
+
+    trainDataset_scale2 = myTransforms.Compose([
+        myTransforms.Normalize(*NORMALISE_PARAMS),
+        myTransforms.Scale(352, 352),
+        myTransforms.RandomCropResize(int(7./224.*352)),
+        myTransforms.RandomFlip(),
+        myTransforms.ToTensor()
+    ])
+
     valDataset = myTransforms.Compose([
         myTransforms.Normalize(*NORMALISE_PARAMS),
         myTransforms.Scale(args.width, args.height),
@@ -200,6 +216,14 @@ def train_video_saliency(args):
         Dataset(args.data_dir, args.dataset_list, transform=trainDataset_main, process_label=True, ignore_index=args.igi, use_flow=True),
         batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=True)
 
+    trainLoader_scale1 = torch.utils.data.DataLoader(
+        Dataset(args.data_dir, args.dataset_list, transform=trainDataset_scale1, process_label=True, ignore_index=args.igi, use_flow=True),
+        batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=True)
+
+    trainLoader_scale2 = torch.utils.data.DataLoader(
+        Dataset(args.data_dir, args.dataset_list, transform=trainDataset_scale2, process_label=True, ignore_index=args.igi, use_flow=True),
+        batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=True)
+
     has_val = False
     if args.val_dataset and args.val_dataset.strip() != "":
         has_val = True
@@ -207,7 +231,10 @@ def train_video_saliency(args):
             Dataset(args.data_dir, args.val_dataset, transform=valDataset, process_label=False, use_flow=True),
             batch_size=12, shuffle=False, num_workers=args.num_workers, pin_memory=True)
 
-    max_batches = len(trainLoader_main)
+    if args.ms:
+        max_batches = len(trainLoader_main) + len(trainLoader_scale1) + len(trainLoader_scale2)
+    else:
+        max_batches = len(trainLoader_main)
     cudnn.benchmark = True
     start_epoch = 0
     cur_iter = 0
@@ -259,8 +286,29 @@ def train_video_saliency(args):
     print(f"📦 Gradient Accumulation: {args.iter_size} (Effective Batch: {args.batch_size * args.iter_size})")
     print("="*50)
 
+    # for epoch in range(start_epoch, args.max_epochs):
+    #     # 1. Training
+    #     loss_train, current_lr = train(args, trainLoader_main, model, criteria, optimizer, epoch, max_batches, cur_iter)
+    #     hist_tr_loss.append(loss_train)
+    #     cur_iter += len(trainLoader_main)
+    #     torch.cuda.empty_cache()
+
+    #     log_str = f"Epoch {epoch+1:02d} | Tr_Loss: {loss_train:.4f} | LR: {current_lr:.8f}"
+
     for epoch in range(start_epoch, args.max_epochs):
         # 1. Training
+        if args.ms:
+            # Training pada skala 1 (320x320)
+            _, current_lr = train(args, trainLoader_scale1, model, criteria, optimizer, epoch, max_batches, cur_iter)
+            cur_iter += len(trainLoader_scale1)
+            torch.cuda.empty_cache()
+            
+            # Training pada skala 2 (352x352)
+            _, current_lr = train(args, trainLoader_scale2, model, criteria, optimizer, epoch, max_batches, cur_iter)
+            cur_iter += len(trainLoader_scale2)
+            torch.cuda.empty_cache()
+
+        # Training pada skala utama (384x384)
         loss_train, current_lr = train(args, trainLoader_main, model, criteria, optimizer, epoch, max_batches, cur_iter)
         hist_tr_loss.append(loss_train)
         cur_iter += len(trainLoader_main)
