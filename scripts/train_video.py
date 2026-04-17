@@ -88,7 +88,7 @@ def val_monitoring(val_loader, model):
         target_squeezed = target.squeeze(1) 
         
         preds = (output[:, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
-        gts = target_squeezed.cpu().numpy().astype(np.uint8)
+        gts = (target_squeezed.cpu().numpy() * 255).astype(np.uint8)
         
         if len(preds.shape) == 2:
             preds = np.expand_dims(preds, axis=0)
@@ -126,7 +126,8 @@ def train(args, train_loader, model, criterion, optimizer, epoch, max_batches, c
             resize = np.random.choice([320, 352, 384])
             input = F.interpolate(input, size=(resize, resize), mode='bilinear', align_corners=False)
             input_1 = F.interpolate(input_1, size=(resize, resize), mode='bilinear', align_corners=False)
-            target = F.interpolate(target.unsqueeze(dim=1), size=(resize, resize), mode='bilinear', align_corners=False).squeeze(dim=1)
+            target = F.interpolate(target, size=(resize, resize), mode='bilinear', align_corners=False)
+            # target = F.interpolate(target.unsqueeze(dim=1), size=(resize, resize), mode='bilinear', align_corners=False).squeeze(dim=1)
         
         output = model(input, input_1)
         loss = criterion(output, target) / args.iter_size
