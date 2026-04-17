@@ -73,11 +73,12 @@ def freeze_bn(m):
         m.eval()
 
 @torch.no_grad()
-def val_monitoring(val_loader, model):
+def val_monitoring(val_loader, model, criterion):
     model.eval()
     SM = M.Smeasure()
     FM = M.Fmeasure()
     MAE_metric = M.MAE()
+    epoch_loss = []
     
     for iter, (input, input_1, target) in enumerate(val_loader):
         input = input.to(device)
@@ -85,6 +86,9 @@ def val_monitoring(val_loader, model):
         target = target.to(device).float()
 
         output = model(input, input_1)
+        loss = criterion(output, target)
+        epoch_loss.append(loss.item())
+
         target_squeezed = target.squeeze(1) 
         
         preds = (output[:, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
@@ -99,10 +103,11 @@ def val_monitoring(val_loader, model):
             FM.step(preds[i], gts[i])
             MAE_metric.step(preds[i], gts[i])
 
+    avg_loss = sum(epoch_loss) / len(epoch_loss)
     s_m = SM.get_results()['sm']
     f_max = FM.get_results()['fm']['curve'].max()
     mae = MAE_metric.get_results()['mae']
-    return s_m, f_max, mae
+    return avg_loss, s_m, f_max, mae
 
 def train(args, train_loader, model, criterion, optimizer, epoch, max_batches, cur_iter=0):
     model.train()
@@ -246,6 +251,7 @@ def train_video_saliency(args):
     hist_s = []
     hist_f = []
     hist_mae = []
+    hist_val_loss = []
 
     print("\n🚀 MEMULAI TRAINING VIDEO")
     if args.freeze_bn:
@@ -265,9 +271,10 @@ def train_video_saliency(args):
         # 2. Validation (Jika ada dataset)
         if has_val:
             print(f"Menguji Validasi Epoch {epoch+1}...")
-            s, f, m = val_monitoring(valLoader, model)
+            v_loss, s, f, m = val_monitoring(valLoader, model, criteria)
+            hist_val_loss.append(v_loss)
             hist_s.append(s); hist_f.append(f); hist_mae.append(m)
-            log_str += f" || Val -> S:{s:.3f} Fmax:{f:.3f} MAE:{m:.3f}"
+            log_str += f" || Val -> Loss:{v_loss:.4f} S:{s:.3f} Fmax:{f:.3f} MAE:{m:.3f}"
             torch.cuda.empty_cache()
 
         # 3. Logging & Checkpoint
@@ -293,14 +300,17 @@ def train_video_saliency(args):
     epochs_range_tr = range(start_epoch + 1, start_epoch + len(hist_tr_loss) + 1)
     
     # Plot Training Loss
+    # Plot Training vs Validation Loss
     plt.figure(figsize=(8, 6))
     plt.plot(epochs_range_tr, hist_tr_loss, 'k-', linewidth=2, label='Training Loss')
-    plt.title('Training Loss over Epochs')
+    if has_val and len(hist_val_loss) > 0:
+        plt.plot(epochs_range_val, hist_val_loss, 'r-', linewidth=2, label='Validation Loss')
+    plt.title('Model Loss over Epochs')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
     plt.grid(True)
-    plt.savefig(os.path.join(args.savedir, 'curve_train_loss.png'), dpi=300)
+    plt.savefig(os.path.join(args.savedir, 'curve_loss.png'), dpi=300)
     plt.close()
 
     # Plot Metrik Validasi (Jika ada)
