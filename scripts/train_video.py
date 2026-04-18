@@ -115,7 +115,8 @@ def val_monitoring(val_loader, model, criterion):
     f_max = FM.get_results()['fm']['curve'].max()
     mae = MAE_metric.get_results()['mae']
     return avg_loss, s_m, f_max, mae
-# def val_monitoring(val_loader, model, criterion):
+
+    # def val_monitoring(val_loader, model, criterion):
 #     model.eval()
 #     SM = M.Smeasure()
 #     FM = M.Fmeasure()
@@ -133,23 +134,23 @@ def val_monitoring(val_loader, model, criterion):
 
 #         target_squeezed = target.squeeze(1) 
         
-        preds = (output[:, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
-        gts = (target_squeezed.cpu().numpy() * 255).astype(np.uint8)
+#         preds = (output[:, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
+#         gts = (target_squeezed.cpu().numpy() * 255).astype(np.uint8)
         
-        if len(preds.shape) == 2:
-            preds = np.expand_dims(preds, axis=0)
-            gts = np.expand_dims(gts, axis=0)
+#         if len(preds.shape) == 2:
+#             preds = np.expand_dims(preds, axis=0)
+#             gts = np.expand_dims(gts, axis=0)
             
-        for i in range(preds.shape[0]):
-            SM.step(preds[i], gts[i])
-            FM.step(preds[i], gts[i])
-            MAE_metric.step(preds[i], gts[i])
+#         for i in range(preds.shape[0]):
+#             SM.step(preds[i], gts[i])
+#             FM.step(preds[i], gts[i])
+#             MAE_metric.step(preds[i], gts[i])
 
-    avg_loss = sum(epoch_loss) / len(epoch_loss)
-    s_m = SM.get_results()['sm']
-    f_max = FM.get_results()['fm']['curve'].max()
-    mae = MAE_metric.get_results()['mae']
-    return avg_loss, s_m, f_max, mae
+#     avg_loss = sum(epoch_loss) / len(epoch_loss)
+#     s_m = SM.get_results()['sm']
+#     f_max = FM.get_results()['fm']['curve'].max()
+#     mae = MAE_metric.get_results()['mae']
+#     return avg_loss, s_m, f_max, mae
 
 def train(args, train_loader, model, criterion, optimizer, epoch, max_batches, cur_iter=0):
     model.train()
