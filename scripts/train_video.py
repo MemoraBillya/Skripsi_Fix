@@ -85,11 +85,53 @@ def val_monitoring(val_loader, model, criterion):
         input_1 = input_1.to(device)
         target = target.to(device).float()
 
+        # Output dari model memiliki 6 channel (multi-scale)
         output = model(input, input_1)
-        loss = criterion(output, target)
-        epoch_loss.append(loss.item())
-
+        
+        # Target disesuaikan ukurannya menjadi (Batch, H, W)
         target_squeezed = target.squeeze(1) 
+        
+        # --- PERHITUNGAN VALIDATION LOSS MASK TUNGGAL ---
+        # Kita hanya mengambil channel ke-0 (output paling utama/resolusi penuh)
+        # dan menghitung Binary Cross Entropy (BCE) terhadap mask asli.
+        val_loss_single = F.binary_cross_entropy(output[:, 0, :, :], target_squeezed)
+        epoch_loss.append(val_loss_single.item())
+        # ------------------------------------------------
+        
+        preds = (output[:, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
+        gts = (target_squeezed.cpu().numpy() * 255).astype(np.uint8)
+        
+        if len(preds.shape) == 2:
+            preds = np.expand_dims(preds, axis=0)
+            gts = np.expand_dims(gts, axis=0)
+            
+        for i in range(preds.shape[0]):
+            SM.step(preds[i], gts[i])
+            FM.step(preds[i], gts[i])
+            MAE_metric.step(preds[i], gts[i])
+
+    avg_loss = sum(epoch_loss) / len(epoch_loss)
+    s_m = SM.get_results()['sm']
+    f_max = FM.get_results()['fm']['curve'].max()
+    mae = MAE_metric.get_results()['mae']
+    return avg_loss, s_m, f_max, mae
+# def val_monitoring(val_loader, model, criterion):
+#     model.eval()
+#     SM = M.Smeasure()
+#     FM = M.Fmeasure()
+#     MAE_metric = M.MAE()
+#     epoch_loss = []
+    
+#     for iter, (input, input_1, target) in enumerate(val_loader):
+#         input = input.to(device)
+#         input_1 = input_1.to(device)
+#         target = target.to(device).float()
+
+#         output = model(input, input_1)
+#         loss = criterion(output, target)
+#         epoch_loss.append(loss.item())
+
+#         target_squeezed = target.squeeze(1) 
         
         preds = (output[:, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
         gts = (target_squeezed.cpu().numpy() * 255).astype(np.uint8)
