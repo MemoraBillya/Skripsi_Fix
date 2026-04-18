@@ -390,7 +390,10 @@ def train_video_saliency(args):
     # ==========================================================
     epochs_range_tr = range(start_epoch + 1, start_epoch + len(hist_tr_loss) + 1)
     
-    # Plot Training Loss
+    # 1. Definisikan epochs_range_val DI SINI sebelum digunakan
+    if has_val and len(hist_val_loss) > 0:
+        epochs_range_val = range(start_epoch + 1, start_epoch + len(hist_val_loss) + 1)
+    
     # Plot Training vs Validation Loss
     plt.figure(figsize=(8, 6))
     plt.plot(epochs_range_tr, hist_tr_loss, 'k-', linewidth=2, label='Training Loss')
@@ -406,7 +409,7 @@ def train_video_saliency(args):
 
     # Plot Metrik Validasi (Jika ada)
     if has_val and len(hist_s) > 0:
-        epochs_range_val = range(start_epoch + 1, start_epoch + len(hist_s) + 1)
+        # epochs_range_val sudah didefinisikan di atas, jadi bisa langsung dipakai
         plt.figure(figsize=(8, 6))
         plt.plot(epochs_range_val, hist_s, 'b-', label='S-measure')
         plt.plot(epochs_range_val, hist_f, 'r--', label='Max F-measure')
