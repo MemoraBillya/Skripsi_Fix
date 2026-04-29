@@ -3,6 +3,11 @@ import torch
 import cv2
 import time
 import os
+import shutil
+import torch
+import cv2
+import time
+import os
 import csv
 import os.path as osp
 import numpy as np
@@ -49,13 +54,15 @@ def test_and_evaluate(args, model, video_dict, save_dir):
             img = img.astype(np.float32) / 255.
             img -= mean
             img /= std
-            img = img[:, :, ::-1].transpose((2, 0, 1))
+            # Gunakan .copy() untuk menghindari error Negative Stride
+            img = img[:, :, ::-1].copy().transpose((2, 0, 1))
             img_var = torch.from_numpy(img).unsqueeze(0).to(device)
             
             flow_img = flow_img.astype(np.float32) / 255.
             flow_img -= mean
             flow_img /= std
-            flow_img = flow_img[:, :, ::-1].transpose((2, 0, 1))
+            # Gunakan .copy() untuk menghindari error Negative Stride
+            flow_img = flow_img[:, :, ::-1].copy().transpose((2, 0, 1))
             flow_var = torch.from_numpy(flow_img).unsqueeze(0).to(device)
             
             # Prediksi
@@ -94,14 +101,13 @@ def test_and_evaluate(args, model, video_dict, save_dir):
     mae_g = MAE_global.get_results()['mae']
     csv_data.append(['ALL_DATASETS', 'GLOBAL_AVERAGE', sm_g, fm_g, mae_g])
 
-    # Simpan CSV
-    csv_path = osp.join(args.save_dir, f"{args.method_tag}_metrics.csv")
+    # Simpan CSV ke DALAM save_dir agar ikut ter-ZIP bersama gambar
+    csv_path = osp.join(save_dir, f"{args.method_tag}_metrics.csv")
     with open(csv_path, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(['Dataset', 'Video', 'S_m', 'F_max', 'MAE'])
         writer.writerows(csv_data)
         
-    print(f"\n✅ Rekap metrik CSV berhasil disimpan ke: {csv_path}")
     return sm_g, fm_g, mae_g
 
 def main(args):
@@ -117,16 +123,15 @@ def main(args):
                 flow_path = osp.join(args.data_dir, line_arr[1].strip())
                 gt_path = osp.join(args.data_dir, line_arr[2].strip())
                 
-                rel_path = osp.relpath(img_path, args.data_dir)
-                parts = rel_path.replace('\\', '/').split('/')
-                
+                # Ekstraksi absolut agar terhindar dari path '..' 
+                parts = img_path.replace('\\', '/').split('/')
                 try:
                     imgs_idx = parts.index('Imgs')
-                    dataset_name = parts[0]
                     video_name = parts[imgs_idx - 1]
+                    dataset_name = parts[imgs_idx - 3] # mundur 3: Imgs -> video -> test -> dataset
                 except ValueError:
-                    dataset_name = parts[0]
                     video_name = parts[-2]
+                    dataset_name = parts[-4] if len(parts) >= 4 else "Dataset"
                 
                 video_dict[(dataset_name, video_name)].append((img_path, flow_path, gt_path))
                 total_frames += 1
@@ -152,7 +157,7 @@ def main(args):
     dummy_img = torch.rand(1, 3, args.width, args.height).to(device)
     dummy_flow = torch.rand(1, 3, args.width, args.height).to(device)
     flops = FlopCountAnalysis(model, (dummy_img, dummy_flow))
-    print(f"⚙️  Total FLOPs: {flops.total()/1e9:.4f} GMac")
+    print(f"total flops: {flops.total()/1e9:.4f}G")
 
     print("⚡ Menguji kecepatan FPS (Batch Size 1)...")
     bs = 1
@@ -166,12 +171,13 @@ def main(args):
 
     # Testing & Evaluasi
     save_dir = osp.join(args.save_dir, args.method_tag)
+    os.makedirs(save_dir, exist_ok=True)
     sm_g, fm_g, mae_g = test_and_evaluate(args, model, video_dict, save_dir)
     print(f'\n🎯 Hasil Akhir Global -> S_m: {sm_g:.4f}, F_max: {fm_g:.4f}, MAE: {mae_g:.4f}')
     
     # ZIP
     zip_path = osp.join(args.save_dir, args.method_tag)
-    print(f"📦 Mengompresi hasil prediksi ke {zip_path}.zip ...")
+    print(f"📦 Mengompresi hasil prediksi dan CSV ke {zip_path}.zip ...")
     shutil.make_archive(zip_path, 'zip', save_dir)
     print("✅ Kompresi selesai!")
 
@@ -190,7 +196,7 @@ if __name__ == '__main__':
 
     device = torch.device('cuda') if args.gpu and torch.cuda.is_available() else torch.device('cpu')
     main(args)
-
+    
 # import shutil
 # import torch
 # import cv2
