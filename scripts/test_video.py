@@ -3,253 +3,192 @@ import torch
 import cv2
 import time
 import os
+import csv
 import os.path as osp
 import numpy as np
-from torch.autograd import Variable
 import torch.nn.functional as F
 from argparse import ArgumentParser
-from collections import OrderedDict
+from collections import defaultdict
+import py_sod_metrics as M
 from models import model_video as net
 from tqdm import tqdm
-import pandas as pd
-import py_sod_metrics as M
 from fvcore.nn import FlopCountAnalysis
 
-
 @torch.no_grad()
-def test_and_evaluate(args, model, video_groups, save_dir):
+def test_and_evaluate(args, model, video_dict, save_dir):
     mean = [0.406, 0.456, 0.485]
     std = [0.225, 0.224, 0.229]
-
-    # Inisialisasi Metrik Global (Untuk seluruh dataset)
-    SM_global = M.Smeasure()
+    
+    # Inisialisasi Metrik Global
     FM_global = M.Fmeasure()
+    SM_global = M.Smeasure()
     MAE_global = M.MAE()
 
-    results_list = []
+    csv_data = []
 
-    # Iterasi per Video
-    for video_folder, paths in tqdm(video_groups.items(), desc="Testing Videos"):
-        # Inisialisasi Metrik Lokal (Khusus untuk 1 video ini saja)
-        SM_video = M.Smeasure()
-        FM_video = M.Fmeasure()
-        MAE_video = M.MAE()
-
-        for img_path, flow_path, label_path in zip(paths['imgs'], paths['flows'], paths['labels']):
-            # 1. Load data
+    print("\n🚀 Memulai Proses Testing & Evaluasi...")
+    for video_key, frames in tqdm(video_dict.items(), desc="Memproses Video"):
+        dataset_name, video_name = video_key
+        
+        # Inisialisasi Metrik Per-Video
+        FM_vid = M.Fmeasure()
+        SM_vid = M.Smeasure()
+        MAE_vid = M.MAE()
+        
+        for img_path, flow_path, label_path in frames:
             image = cv2.imread(img_path)
             flow = cv2.imread(flow_path)
-            label = cv2.imread(label_path, 0)
-
-            # 2. Resize
-            img_resized = cv2.resize(image, (args.width, args.height))
-            flow_resized = cv2.resize(flow, (args.width, args.height))
+            gt = cv2.imread(label_path, cv2.IMREAD_GRAYSCALE)
             
-            # 3. Normalize Image
-            img_tensor = img_resized.astype(np.float32) / 255.
-            img_tensor -= mean
-            img_tensor /= std
-            img_tensor = img_tensor[:, :, ::-1].copy().transpose((2, 0, 1))
-            img_tensor = torch.from_numpy(img_tensor).unsqueeze(0).to(device)
+            orig_shape = image.shape[:2]
             
-            # 4. Normalize Flow
-            flow_tensor = flow_resized.astype(np.float32) / 255.
-            flow_tensor -= mean
-            flow_tensor /= std
-            flow_tensor = flow_tensor[:, :, ::-1].copy().transpose((2, 0, 1))
-            flow_tensor = torch.from_numpy(flow_tensor).unsqueeze(0).to(device)
-
-            # 5. Forward Pass Model
-            imgs_out = model(img_tensor, flow_tensor)
-            img_out = imgs_out[:, 0, :, :].unsqueeze(dim=0)
-            img_out = F.interpolate(img_out, size=image.shape[:2], mode='bilinear', align_corners=False)
+            # Pre-processing
+            img = cv2.resize(image, (args.width, args.height))
+            flow_img = cv2.resize(flow, (args.width, args.height))
             
-            sal_map = (img_out * 255).data.cpu().numpy()[0, 0].astype(np.uint8)
+            img = img.astype(np.float32) / 255.
+            img -= mean
+            img /= std
+            img = img[:, :, ::-1].transpose((2, 0, 1))
+            img_var = torch.from_numpy(img).unsqueeze(0).to(device)
             
-            # 6. Simpan Masking per Dataset & per Video
-            rel_path = osp.relpath(img_path, args.data_dir)
-            save_rel_path = rel_path.replace('.jpg', '.png').replace('.jpeg', '.png')
-            save_path = osp.join(save_dir, save_rel_path)
+            flow_img = flow_img.astype(np.float32) / 255.
+            flow_img -= mean
+            flow_img /= std
+            flow_img = flow_img[:, :, ::-1].transpose((2, 0, 1))
+            flow_var = torch.from_numpy(flow_img).unsqueeze(0).to(device)
             
-            # Buat foldernya jika belum ada
-            os.makedirs(osp.dirname(save_path), exist_ok=True)
-            cv2.imwrite(save_path, sal_map)
+            # Prediksi
+            preds = model(img_var, flow_var)
+            pred_map = preds[:, 0, :, :].unsqueeze(1)
             
-            # 7. Update Metrik (Video & Global)
-            # Pastikan label ground truth berada dalam rentang 0-255 uint8
-            if label.max() == 1:
-                label = label * 255
-            gt_np = label.astype(np.uint8)
-            pred_np = sal_map
+            # Post-processing & Simpan Mask
+            pred_map = F.interpolate(pred_map, size=orig_shape, mode='bilinear', align_corners=False)
+            pred_np = (pred_map.squeeze().cpu().numpy() * 255).astype(np.uint8)
             
-            SM_video.step(pred_np, gt_np)
-            FM_video.step(pred_np, gt_np)
-            MAE_video.step(pred_np, gt_np)
+            frame_name = osp.basename(img_path).replace('.jpg', '.png')
+            vid_save_dir = osp.join(save_dir, dataset_name, video_name)
+            os.makedirs(vid_save_dir, exist_ok=True)
+            
+            save_path = osp.join(vid_save_dir, frame_name)
+            cv2.imwrite(save_path, pred_np)
+            
+            # Hitung Metrik
+            FM_vid.step(pred=pred_np, gt=gt)
+            SM_vid.step(pred=pred_np, gt=gt)
+            MAE_vid.step(pred=pred_np, gt=gt)
+            
+            FM_global.step(pred=pred_np, gt=gt)
+            SM_global.step(pred=pred_np, gt=gt)
+            MAE_global.step(pred=pred_np, gt=gt)
+            
+        # Catat Metrik Video
+        fm_v = FM_vid.get_results()['fm']['curve'].max()
+        sm_v = SM_vid.get_results()['sm']
+        mae_v = MAE_vid.get_results()['mae']
+        csv_data.append([dataset_name, video_name, sm_v, fm_v, mae_v])
 
-            SM_global.step(pred_np, gt_np)
-            FM_global.step(pred_np, gt_np)
-            MAE_global.step(pred_np, gt_np)
+    # Catat Metrik Global
+    fm_g = FM_global.get_results()['fm']['curve'].max()
+    sm_g = SM_global.get_results()['sm']
+    mae_g = MAE_global.get_results()['mae']
+    csv_data.append(['ALL_DATASETS', 'GLOBAL_AVERAGE', sm_g, fm_g, mae_g])
 
-        # 8. Hitung Nilai Akhir Metrik untuk Video Saat Ini
-        video_sm = SM_video.get_results()['sm']
-        video_fm = FM_video.get_results()['fm']['curve'].max()
-        video_mae = MAE_video.get_results()['mae']
-
-        results_list.append({
-            'Folder Video': video_folder,
-            'S-measure': round(video_sm, 4),
-            'Max F-measure': round(video_fm, 4),
-            'MAE': round(video_mae, 4)
-        })
-
-    # 9. Hitung Nilai Akhir Metrik Global (Satu Dataset Penuh)
-    global_sm = SM_global.get_results()['sm']
-    global_fm = FM_global.get_results()['fm']['curve'].max()
-    global_mae = MAE_global.get_results()['mae']
-
-    results_list.append({
-        'Folder Video': 'OVERALL_DATASET',
-        'S-measure': round(global_sm, 4),
-        'Max F-measure': round(global_fm, 4),
-        'MAE': round(global_mae, 4)
-    })
-
-    return results_list, global_sm, global_fm, global_mae
-
+    # Simpan CSV
+    csv_path = osp.join(args.save_dir, f"{args.method_tag}_metrics.csv")
+    with open(csv_path, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Dataset', 'Video', 'S_m', 'F_max', 'MAE'])
+        writer.writerows(csv_data)
+        
+    print(f"\n✅ Rekap metrik CSV berhasil disimpan ke: {csv_path}")
+    return sm_g, fm_g, mae_g
 
 def main(args):
-    # 1. Baca list dataset dan kelompokkan per video
-    video_groups = OrderedDict()
+    video_dict = defaultdict(list)
+    total_frames = 0
     
     lst_file = osp.join(args.data_dir, args.dataset_name + '.lst')
     with open(lst_file) as fid:
         for line in fid:
             line_arr = line.strip().split()
             if len(line_arr) >= 3:
-                img_rel = line_arr[0].strip()
-                flow_rel = line_arr[1].strip()
-                gt_rel = line_arr[2].strip()
+                img_path = osp.join(args.data_dir, line_arr[0].strip())
+                flow_path = osp.join(args.data_dir, line_arr[1].strip())
+                gt_path = osp.join(args.data_dir, line_arr[2].strip())
                 
-                img_path = osp.join(args.data_dir, img_rel)
-                flow_path = osp.join(args.data_dir, flow_rel)
-                gt_path = osp.join(args.data_dir, gt_rel)
+                rel_path = osp.relpath(img_path, args.data_dir)
+                parts = rel_path.replace('\\', '/').split('/')
                 
-                # Menggunakan nama folder sebagai identifier video
-                video_folder = osp.dirname(img_rel) 
+                try:
+                    imgs_idx = parts.index('Imgs')
+                    dataset_name = parts[0]
+                    video_name = parts[imgs_idx - 1]
+                except ValueError:
+                    dataset_name = parts[0]
+                    video_name = parts[-2]
                 
-                if video_folder not in video_groups:
-                    video_groups[video_folder] = {'imgs': [], 'flows': [], 'labels': []}
-                
-                video_groups[video_folder]['imgs'].append(img_path)
-                video_groups[video_folder]['flows'].append(flow_path)
-                video_groups[video_folder]['labels'].append(gt_path)
+                video_dict[(dataset_name, video_name)].append((img_path, flow_path, gt_path))
+                total_frames += 1
 
-    total_frames = sum([len(v['imgs']) for v in video_groups.values()])
-    print(f"Memuat {total_frames} frame dari {len(video_groups)} video.")
+    print(f"📊 Menemukan {total_frames} frames dari {len(video_dict)} video unik.")
 
-    # 2. Load Model
-    model = net.GAPNet(arch=args.arch, pretrained=True)
+    model = net.GAPNet(arch=args.arch, pretrained=False)
     
     if not osp.isfile(args.pretrained):
-        print(f'File pretrained model tidak ditemukan: {args.pretrained}')
+        print(f'❌ File pre-trained tidak ditemukan: {args.pretrained}')
         exit(-1)
 
     state_dict = torch.load(args.pretrained, map_location='cpu')
-    # Jika checkpoint dari pelatihan DataParallel mengandung 'module.', kita bersihkan
     if 'state_dict' in state_dict:
         state_dict = state_dict['state_dict']
-    clean_state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+    state_dict = {k[7:] if k.startswith('module.') else k: v for k, v in state_dict.items()}
     
-    model.load_state_dict(clean_state_dict, strict=True)
+    model.load_state_dict(state_dict, strict=False)
     model = model.to(device)
     model.eval()
 
-    total_parameters = sum([np.prod(p.size()) for p in model.parameters()])
-    print(f'Total parameter jaringan: {total_parameters/1e6:.6f}M')
+    # FLOPs & FPS
+    dummy_img = torch.rand(1, 3, args.width, args.height).to(device)
+    dummy_flow = torch.rand(1, 3, args.width, args.height).to(device)
+    flops = FlopCountAnalysis(model, (dummy_img, dummy_flow))
+    print(f"⚙️  Total FLOPs: {flops.total()/1e9:.4f} GMac")
 
-    # 3. Hitung FLOPs
-    print("Menghitung FLOPs...")
-    flops = FlopCountAnalysis(model, (torch.rand(1, 3, args.width, args.height).to(device), 
-                                     torch.rand(1, 3, args.width, args.height).to(device)))
-    print(f"Total FLOPs: {flops.total()/1e9:.4f} G")
-
-    # 4. Speed Test (FPS)
-    print("Menjalankan speed test (FPS)...")
-    bs = 10  # Batch size untuk test FPS
-    x1 = torch.randn(bs, 3, args.width, args.height).to(device)
-    x2 = torch.randn(bs, 3, args.width, args.height).to(device)
-    
+    print("⚡ Menguji kecepatan FPS (Batch Size 1)...")
+    bs = 1
     with torch.no_grad():
-        # Pemanasan GPU
-        for _ in range(50):
-            _ = model(x1, x2)
-    
-        total_t = 0
-        iterations = 100
-        for _ in range(iterations):
-            start = time.time()
-            _ = model(x1, x2)
-            torch.cuda.synchronize() # Sinkronisasi akurat untuk GPU
-            total_t += time.time() - start
+        for _ in range(50): _ = model(dummy_img, dummy_flow)
+        from time import time
+        start_t = time()
+        for _ in range(100): _ = model(dummy_img, dummy_flow)
+        total_t = time() - start_t
+    print(f"⏱️  Kecepatan: {100 / total_t * bs:.2f} FPS")
 
-    fps = (iterations * bs) / total_t
-    print(f"Kecepatan (FPS): {fps:.2f} frames per second")
-    print("-" * 50)
-    
-    # 5. Persiapkan Direktori Penyimpanan
+    # Testing & Evaluasi
     save_dir = osp.join(args.save_dir, args.method_tag)
-    os.makedirs(save_dir, exist_ok=True)
-
-    # 6. Jalankan Proses Testing & Evaluasi
-    results_list, global_sm, global_fm, global_mae = test_and_evaluate(args, model, video_groups, save_dir)
+    sm_g, fm_g, mae_g = test_and_evaluate(args, model, video_dict, save_dir)
+    print(f'\n🎯 Hasil Akhir Global -> S_m: {sm_g:.4f}, F_max: {fm_g:.4f}, MAE: {mae_g:.4f}')
     
-    # 7. Simpan Hasil ke CSV
-    csv_save_path = osp.join(save_dir, f'Metrics_{args.dataset_name}.csv')
-    df = pd.DataFrame(results_list)
-    df.to_csv(csv_save_path, index=False)
-    
-    print("-" * 50)
-    print(f"✅ Evaluasi Selesai untuk Dataset: {args.dataset_name}")
-    print(f"✅ Masking berhasil disimpan di: {save_dir}")
-    print(f"✅ Laporan CSV berhasil disimpan di: {csv_save_path}")
-    print(f"📊 HASIL OVERALL -> S-Measure: {global_sm:.4f} | Max F-measure: {global_fm:.4f} | MAE: {global_mae:.4f}")
-
-    # ==========================================
-    # INI UNTUK ZIP
-    # ==========================================
-    print("\n📦 Sedang mengompres hasil menjadi ZIP...")
-    zip_filename = osp.join(args.save_dir, f"{args.method_tag}_{args.dataset_name}")
-    shutil.make_archive(zip_filename, 'zip', save_dir)
-    print(f"✅ Berhasil! File zip tersimpan di: {zip_filename}.zip")
-
+    # ZIP
+    zip_path = osp.join(args.save_dir, args.method_tag)
+    print(f"📦 Mengompresi hasil prediksi ke {zip_path}.zip ...")
+    shutil.make_archive(zip_path, 'zip', save_dir)
+    print("✅ Kompresi selesai!")
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument('--arch', default='mobilenetv2', help='backbone: vgg16, resnet50, mobilenetv2, dll')
-    parser.add_argument('--data_dir', default="./data", help='Direktori utama data')
-    parser.add_argument('--width', type=int, default=384, help='Lebar gambar RGB')
-    parser.add_argument('--height', type=int, default=384, help='Tinggi gambar RGB')
-    parser.add_argument('--gpu', default=True, type=lambda x: (str(x).lower() == 'true'), help='Gunakan GPU')
-    parser.add_argument('--pretrained', default='model_10.pth', help='Path ke file model hasil training (.pth)')
-    parser.add_argument('--dataset_name', default='DAVSOD_test', type=str, help="Nama dataset (nama file .lst)")
-    parser.add_argument('--save_dir', default='./test_results', type=str, help="Direktori utama penyimpanan prediksi")
-    parser.add_argument('--method_tag', default='GAPNet_Ours', type=str, help="Nama sub-folder eksperimen (misal: eksperimen_1)")
-    
-    # Argumen arsitektur bawaan GAPNet
-    parser.add_argument('--dds', default=1, type=int)
-    parser.add_argument('--gbg', default=1, type=int)
-    parser.add_argument('--igi', default=1, type=int)
-    parser.add_argument('--kvc', default=0, type=int)
-    parser.add_argument('--qc', default=1, type=int)
-    parser.add_argument('--attention', default="EA", type=str)
-    parser.add_argument('--dilation_opt', default=1, type=int)
-    parser.add_argument('--low_global_vit', default=0, type=int)
-    parser.add_argument('--vit_dwconv', default=1, type=int)
-    parser.add_argument('--supervision', default=8, type=int)
-    
+    parser.add_argument('--arch', default='iformer_tiny')
+    parser.add_argument('--data_dir', default="/kaggle/input/datasets/billydawson/vsod-skripsi-lst/")
+    parser.add_argument('--width', type=int, default=384)
+    parser.add_argument('--height', type=int, default=384)
+    parser.add_argument('--gpu', default=True, type=lambda x: (str(x).lower() == 'true'))
+    parser.add_argument('--pretrained', required=True)
+    parser.add_argument('--dataset_name', default='DAVSOD_test')
+    parser.add_argument('--save_dir', default='/kaggle/working/test_results')
+    parser.add_argument('--method_tag', default='gapnet_iformer')
     args = parser.parse_args()
 
-    device = torch.device('cuda') if args.gpu else torch.device('cpu')
+    device = torch.device('cuda') if args.gpu and torch.cuda.is_available() else torch.device('cpu')
     main(args)
 
 # import shutil
