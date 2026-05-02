@@ -51,12 +51,11 @@ def main():
         state_dict = torch.load(epoch_path, map_location=device)
         new_state_dict = {}
         for k, v in state_dict.items():
+            # Hanya tangani awalan 'module.' akibat DataParallel
             name = k[7:] if k.startswith('module.') else k
-            # Fix tambahan jika ada nesting backbone ganda
-            if name.startswith('backbone.backbone.'):
-                name = name.replace('backbone.backbone.', 'backbone.')
             new_state_dict[name] = v
             
+        # Memuat state dictionary yang sudah dibersihkan
         model.load_state_dict(new_state_dict, strict=True)
 
         for ds_name, ds_txt in datasets.items():
