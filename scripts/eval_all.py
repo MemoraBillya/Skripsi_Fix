@@ -11,7 +11,7 @@ import sys
 # Karena file ini ada di Skripsi_Fix/scripts/, parent directory-nya adalah Skripsi_Fix/
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from models.iformer_gapnet import Iformer_GapNet
+from models.iformer_gapnet import iFormerGapNet
 from dataset import test_dataset
 from saleval import Eval_thread
 
