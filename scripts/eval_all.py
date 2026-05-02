@@ -67,10 +67,10 @@ def main():
                     img_gt_pairs.append(line.strip().split())
 
             # CARA INISIALISASI TERAMAN (Constructor-based)
-            FM = M.FmeasureV2(handlers=[M.FmeasureHandler(with_dynamic=True, with_adaptive=True)])
-            EM = M.EmeasureV2(handlers=[M.EmeasureHandler(with_dynamic=True, with_adaptive=True)])
+            FM = M.Fmeasure()
             WFM = M.WeightedFmeasure()
             SM = M.Smeasure()
+            EM = M.Emeasure()
             MAE = M.MAE()
 
             with torch.no_grad():
