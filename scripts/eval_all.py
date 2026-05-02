@@ -70,7 +70,7 @@ def main():
                     img_gt_pairs.append(line.strip().split())
 
             # Inisialisasi objek metrik dari py_sod_metrics[cite: 1]
-            FM = M.Fmeasure()
+            FM = M.FmeasureV2()
             WFM = M.WeightedFmeasure()
             SM = M.Smeasure()
             EM = M.Emeasure()
@@ -89,13 +89,13 @@ def main():
                     
                     orig_h, orig_w = image.shape[:2]
                     
-                    # Preprocessing: Resize, Normalisasi, dan Transpose[cite: 1]
+                    # Preprocessing: Resize, Normalisasi, dan Transpose
                     img_input = cv2.resize(image, (args.width, args.height))
                     img_input = img_input.astype(np.float32) / 255.
                     img_input = (img_input - mean) / std
-                    img_input = img_input[:, :, ::-1].transpose((2, 0, 1)) # BGR to RGB
+                    # Gunakan .copy() untuk menghilangkan negative strides sebelum dikonversi ke tensor
+                    img_input = img_input[:, :, ::-1].copy().transpose((2, 0, 1)) 
                     img_tensor = torch.from_numpy(img_input).unsqueeze(0).to(device)
-
                     # Inference: Ambil channel 0 sebagai hasil prediksi utama[cite: 1]
                     res = model(img_tensor)
                     pred_map = res[:, 0, :, :].unsqueeze(1)
