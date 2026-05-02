@@ -1,4 +1,3 @@
-%%writefile Skripsi_Fix-master/scripts/eval_all.py
 import os
 import glob
 import csv
@@ -9,9 +8,9 @@ from tqdm import tqdm
 import sys
 
 # Menambahkan root folder repo ke system path secara dinamis
+# Karena file ini ada di Skripsi_Fix/scripts/, parent directory-nya adalah Skripsi_Fix/
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import berdasarkan struktur direktori repo-mu
 from models.iformer_gapnet import Iformer_GapNet
 from dataset import test_dataset
 from saleval import Eval_thread
@@ -26,7 +25,7 @@ def get_args():
 def main():
     args = get_args()
     
-    # Path dataset (Pastikan path ini benar di env Kaggle kamu)
+    # Path dataset di Kaggle
     datasets = {
         "PASCAL-S": "/kaggle/input/sod-skripsi/PASCAL-S.txt",
         "HKU-IS": "/kaggle/input/sod-skripsi/HKU-IS.txt",
@@ -48,7 +47,7 @@ def main():
     model = Iformer_GapNet().to(device) 
     model.eval()
 
-    # Buat header CSV sesuai request: F max, F weighted, E max, E mean, S mea, Mean (MAE)
+    # Buat header CSV
     with open(args.out_csv, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(['Model_Epoch', 'Dataset', 'F_max', 'F_weighted', 'E_max', 'E_mean', 'S_measure', 'Mean_MAE'])
@@ -79,11 +78,9 @@ def main():
                     
                     evaluator.step(res, gt_numpy)
 
-            # Ekstrak metrik
+            # Ekstrak metrik dengan metode aman (.get)
             metrics = evaluator.get_results()
             
-            # --- PENARIKAN METRIK AMAN ---
-            # Menggunakan .get() agar tidak error jika penamaan key di saleval.py sedikit berbeda
             f_max = metrics.get('maxf', metrics.get('F_max', metrics.get('f_max', 0.0)))
             f_w = metrics.get('weightf', metrics.get('wF', metrics.get('F_w', 0.0)))
             e_max = metrics.get('maxe', metrics.get('E_max', metrics.get('e_max', 0.0)))
@@ -104,7 +101,7 @@ def main():
                     f"{mae:.4f}"
                 ])
 
-    print(f"\nUji hipotesis selesai! Hasil bisa didownload di: {args.out_csv}")
+    print(f"\nUji hipotesis selesai! Hasil tersimpan di: {args.out_csv}")
 
 if __name__ == "__main__":
     main()
