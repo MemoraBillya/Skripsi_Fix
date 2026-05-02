@@ -1,3 +1,4 @@
+%%writefile Skripsi_Fix-master/scripts/eval_all.py
 import os
 import glob
 import csv
@@ -7,25 +8,25 @@ import torch.nn.functional as F
 from tqdm import tqdm
 import sys
 
-# Menambahkan root folder repo ke system path agar bisa import dari folder models/ dan dataset.py
+# Menambahkan root folder repo ke system path secara dinamis
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Sesuaikan dengan nama fungsi/class di repo kamu
+# Import berdasarkan struktur direktori repo-mu
 from models.iformer_gapnet import Iformer_GapNet
 from dataset import test_dataset
 from saleval import Eval_thread
 
 def get_args():
-    parser = argparse.ArgumentParser(description="Evaluate all epochs in memory without saving images")
+    parser = argparse.ArgumentParser(description="Evaluate SOD models in memory")
     parser.add_argument('--model_dir', type=str, required=True, help='Directory containing .pth files')
-    parser.add_argument('--out_csv', type=str, default='evaluation_results.csv', help='Path to save the output CSV')
+    parser.add_argument('--out_csv', type=str, default='/kaggle/working/hasil_evaluasi_skripsi.csv')
     parser.add_argument('--testsize', type=int, default=352, help='Image size for testing')
     return parser.parse_args()
 
 def main():
     args = get_args()
     
-    # Kumpulan path dataset di Kaggle
+    # Path dataset (Pastikan path ini benar di env Kaggle kamu)
     datasets = {
         "PASCAL-S": "/kaggle/input/sod-skripsi/PASCAL-S.txt",
         "HKU-IS": "/kaggle/input/sod-skripsi/HKU-IS.txt",
@@ -37,34 +38,33 @@ def main():
 
     model_paths = sorted(glob.glob(os.path.join(args.model_dir, "*.pth")))
     if not model_paths:
-        print(f"Error: Tidak ada file .pth ditemukan di {args.model_dir}")
+        print(f"Error: Tidak ada file .pth di {args.model_dir}")
         return
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    print(f"Menggunakan device: {device}")
     
-    # Inisialisasi model
-    # Jika iformer butuh parameter, masukkan di sini (misal: backbone='iformer-t')
+    # Inisialisasi Model
     model = Iformer_GapNet().to(device) 
     model.eval()
 
-    # Buat header CSV
+    # Buat header CSV sesuai request: F max, F weighted, E max, E mean, S mea, Mean (MAE)
     with open(args.out_csv, mode='w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(['Model_Epoch', 'Dataset', 'MAE', 'F_beta', 'S_m', 'E_m'])
+        writer.writerow(['Model_Epoch', 'Dataset', 'F_max', 'F_weighted', 'E_max', 'E_mean', 'S_measure', 'Mean_MAE'])
 
+    # Mulai evaluasi
     for epoch_path in model_paths:
         epoch_name = os.path.basename(epoch_path).replace('.pth', '')
-        print(f"\n{'='*40}\nEvaluating: {epoch_name}\n{'='*40}")
+        print(f"\n{'='*50}\nEvaluasi Model: {epoch_name}\n{'='*50}")
         
-        # Load bobot
+        # Load bobot model
         model.load_state_dict(torch.load(epoch_path, map_location=device))
 
         for ds_name, ds_txt in datasets.items():
             image_root = os.path.dirname(ds_txt)
             gt_root = os.path.dirname(ds_txt)
             
-            # Load dataloader
             test_loader = test_dataset(image_root, gt_root, testsize=args.testsize)
             evaluator = Eval_thread()
             
@@ -79,21 +79,32 @@ def main():
                     
                     evaluator.step(res, gt_numpy)
 
-            # Hitung rata-rata
+            # Ekstrak metrik
             metrics = evaluator.get_results()
             
-            # Append ke CSV
+            # --- PENARIKAN METRIK AMAN ---
+            # Menggunakan .get() agar tidak error jika penamaan key di saleval.py sedikit berbeda
+            f_max = metrics.get('maxf', metrics.get('F_max', metrics.get('f_max', 0.0)))
+            f_w = metrics.get('weightf', metrics.get('wF', metrics.get('F_w', 0.0)))
+            e_max = metrics.get('maxe', metrics.get('E_max', metrics.get('e_max', 0.0)))
+            e_mean = metrics.get('meane', metrics.get('E_mean', metrics.get('e_mean', 0.0)))
+            s_m = metrics.get('sm', metrics.get('S_m', metrics.get('s_m', 0.0)))
+            mae = metrics.get('mae', metrics.get('MAE', metrics.get('Mean', 0.0)))
+            
+            # Append baris ke CSV
             with open(args.out_csv, mode='a', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow([
                     epoch_name, ds_name, 
-                    f"{metrics['mae']:.4f}", 
-                    f"{metrics['f_beta']:.4f}", 
-                    f"{metrics['s_m']:.4f}",
-                    f"{metrics['e_m']:.4f}"
+                    f"{f_max:.4f}", 
+                    f"{f_w:.4f}", 
+                    f"{e_max:.4f}",
+                    f"{e_mean:.4f}",
+                    f"{s_m:.4f}",
+                    f"{mae:.4f}"
                 ])
 
-    print(f"\nSelesai! Hasil tersimpan di: {args.out_csv}")
+    print(f"\nUji hipotesis selesai! Hasil bisa didownload di: {args.out_csv}")
 
 if __name__ == "__main__":
     main()
