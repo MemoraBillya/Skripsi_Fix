@@ -17,7 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Ganti "Iformer_GapNet" dengan nama class yang ada di iformer_gapnet.py
 # ======================================================================
 from models.iformer_gapnet import iFormerGapNet
-from dataset import test_dataset
+from dataset import Dataset
 
 def get_args():
     parser = argparse.ArgumentParser(description="Evaluate SOD with PySODMetrics")
@@ -67,7 +67,7 @@ def main():
             image_root = os.path.dirname(ds_txt)
             gt_root = os.path.dirname(ds_txt)
             
-            test_loader = test_dataset(image_root, gt_root, testsize=args.testsize)
+            test_loader = Dataset(image_root, gt_root, testsize=args.testsize)
             
             # Inisialisasi Instance PySODMetrics
             FM = py_sod_metrics.Fmeasure()
