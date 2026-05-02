@@ -1,4 +1,3 @@
-%%writefile Skripsi_Fix/scripts/eval_all_pysod.py
 import os
 import sys
 import glob
