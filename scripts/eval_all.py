@@ -69,19 +69,18 @@ def main():
                 for line in f:
                     img_gt_pairs.append(line.strip().split())
 
-            # Inisialisasi Instance PySODMetrics dengan Handler (Wajib untuk versi terbaru)
-            # Gunakan FmeasureV2 dan EmeasureV2 agar lebih stabil
+            # Inisialisasi Instance PySODMetrics dengan Handler
             FM = M.FmeasureV2()
-            FM.add_handler(M.FmHandler())  # Handler untuk F-max & F-mean
+            FM.add_handler(M.FmeasureHandler())  # Gunakan FmeasureHandler, bukan FmHandler
             
             EM = M.EmeasureV2()
-            EM.add_handler(M.EmHandler())  # Handler untuk E-max & E-mean
+            EM.add_handler(M.EmeasureHandler())  # Gunakan EmeasureHandler
             
-            # Metrik berikut tidak memerlukan handler tambahan
+            # Metrik berikut tetap sama karena tidak menggunakan sistem V2 modular
             WFM = M.WeightedFmeasure()
             SM = M.Smeasure()
             MAE = M.MAE()
-
+            
             with torch.no_grad():
                 for img_rel, gt_rel in tqdm(img_gt_pairs, desc=f"Dataset {ds_name}"):
                     # Path dataset (Sesuaikan dengan lokasi root data Anda)
