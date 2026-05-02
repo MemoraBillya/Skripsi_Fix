@@ -1,31 +1,35 @@
+%%writefile Skripsi_Fix/scripts/eval_all_pysod.py
 import os
+import sys
 import glob
 import csv
 import argparse
 import torch
 import torch.nn.functional as F
+import numpy as np
 from tqdm import tqdm
-import sys
+import py_sod_metrics
 
-# Menambahkan root folder repo ke system path secara dinamis
-# Karena file ini ada di Skripsi_Fix/scripts/, parent directory-nya adalah Skripsi_Fix/
+# Tambahkan root direktori ke system path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# ======================================================================
+# PENTING: UBAH BARIS INI SESUAI NAMA CLASS ASLI MODELMU
+# Ganti "Iformer_GapNet" dengan nama class yang ada di iformer_gapnet.py
+# ======================================================================
 from models.iformer_gapnet import iFormerGapNet
 from dataset import test_dataset
-from saleval import Eval_thread
 
 def get_args():
-    parser = argparse.ArgumentParser(description="Evaluate SOD models in memory")
-    parser.add_argument('--model_dir', type=str, required=True, help='Directory containing .pth files')
-    parser.add_argument('--out_csv', type=str, default='/kaggle/working/hasil_evaluasi_skripsi.csv')
-    parser.add_argument('--testsize', type=int, default=352, help='Image size for testing')
+    parser = argparse.ArgumentParser(description="Evaluate SOD with PySODMetrics")
+    parser.add_argument('--model_dir', type=str, required=True)
+    parser.add_argument('--out_csv', type=str, default='/kaggle/working/hasil_pysod_skripsi.csv')
+    parser.add_argument('--testsize', type=int, default=352)
     return parser.parse_args()
 
 def main():
     args = get_args()
     
-    # Path dataset di Kaggle
     datasets = {
         "PASCAL-S": "/kaggle/input/sod-skripsi/PASCAL-S.txt",
         "HKU-IS": "/kaggle/input/sod-skripsi/HKU-IS.txt",
@@ -43,8 +47,10 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Menggunakan device: {device}")
     
-    # Inisialisasi Model
-    model = Iformer_GapNet().to(device) 
+    # ======================================================================
+    # PENTING: UBAH JUGA DI SINI (Samakan dengan nama Class yang di-import)
+    # ======================================================================
+    model = iFormerGapNet().to(device) 
     model.eval()
 
     # Buat header CSV
@@ -52,12 +58,10 @@ def main():
         writer = csv.writer(file)
         writer.writerow(['Model_Epoch', 'Dataset', 'F_max', 'F_weighted', 'E_max', 'E_mean', 'S_measure', 'Mean_MAE'])
 
-    # Mulai evaluasi
     for epoch_path in model_paths:
         epoch_name = os.path.basename(epoch_path).replace('.pth', '')
         print(f"\n{'='*50}\nEvaluasi Model: {epoch_name}\n{'='*50}")
         
-        # Load bobot model
         model.load_state_dict(torch.load(epoch_path, map_location=device))
 
         for ds_name, ds_txt in datasets.items():
@@ -65,7 +69,13 @@ def main():
             gt_root = os.path.dirname(ds_txt)
             
             test_loader = test_dataset(image_root, gt_root, testsize=args.testsize)
-            evaluator = Eval_thread()
+            
+            # Inisialisasi Instance PySODMetrics
+            FM = py_sod_metrics.Fmeasure()
+            WFM = py_sod_metrics.WeightedFmeasure()
+            SM = py_sod_metrics.Smeasure()
+            EM = py_sod_metrics.Emeasure()
+            MAE = py_sod_metrics.MAE()
             
             with torch.no_grad():
                 for image, gt, name in tqdm(test_loader, desc=f"Testing {ds_name}"):
@@ -76,19 +86,36 @@ def main():
                     res = res.sigmoid().data.cpu().numpy().squeeze()
                     gt_numpy = gt.numpy().squeeze()
                     
-                    evaluator.step(res, gt_numpy)
+                    # Konversi array ke format yang dimengerti PySODMetrics
+                    # Prediksi diubah ke rentang 0-255 (float)
+                    pred_np = (res * 255).astype(np.float32)
+                    
+                    # Ground Truth diubah ke binary mask murni (0 atau 255, uint8)
+                    gt_np = (gt_numpy * 255).astype(np.uint8)
+                    gt_np = np.where(gt_np > 128, 255, 0).astype(np.uint8)
+                    
+                    # Beri makan metrik satu per satu
+                    FM.step(pred_np, gt_np)
+                    WFM.step(pred_np, gt_np)
+                    SM.step(pred_np, gt_np)
+                    EM.step(pred_np, gt_np)
+                    MAE.step(pred_np, gt_np)
 
-            # Ekstrak metrik dengan metode aman (.get)
-            metrics = evaluator.get_results()
+            # Ekstrak hasil dari masing-masing objek PySODMetrics
+            fm_res = FM.get_results()['fm']
+            wfm_res = WFM.get_results()['wfm']
+            sm_res = SM.get_results()['sm']
+            em_res = EM.get_results()['em']
+            mae_res = MAE.get_results()['mae']
             
-            f_max = metrics.get('maxf', metrics.get('F_max', metrics.get('f_max', 0.0)))
-            f_w = metrics.get('weightf', metrics.get('wF', metrics.get('F_w', 0.0)))
-            e_max = metrics.get('maxe', metrics.get('E_max', metrics.get('e_max', 0.0)))
-            e_mean = metrics.get('meane', metrics.get('E_mean', metrics.get('e_mean', 0.0)))
-            s_m = metrics.get('sm', metrics.get('S_m', metrics.get('s_m', 0.0)))
-            mae = metrics.get('mae', metrics.get('MAE', metrics.get('Mean', 0.0)))
+            # Pengambilan nilai yang spesifik
+            f_max = fm_res['curve'].max()
+            f_w = wfm_res
+            e_max = em_res['curve'].max()
+            e_mean = em_res['curve'].mean()
+            s_m = sm_res
+            mae_m = mae_res
             
-            # Append baris ke CSV
             with open(args.out_csv, mode='a', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow([
@@ -98,10 +125,10 @@ def main():
                     f"{e_max:.4f}",
                     f"{e_mean:.4f}",
                     f"{s_m:.4f}",
-                    f"{mae:.4f}"
+                    f"{mae_m:.4f}"
                 ])
 
-    print(f"\nUji hipotesis selesai! Hasil tersimpan di: {args.out_csv}")
+    print(f"\nUji hipotesis selesai! Hasil bisa didownload di: {args.out_csv}")
 
 if __name__ == "__main__":
     main()
