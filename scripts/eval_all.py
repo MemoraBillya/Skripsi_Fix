@@ -7,146 +7,128 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from tqdm import tqdm
-import py_sod_metrics
+import cv2
+import py_sod_metrics as M
 
-# Tambahkan root direktori ke system path
+# Menambahkan root direktori ke system path agar folder models terbaca
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# ======================================================================
-# PENTING: UBAH BARIS INI SESUAI NAMA CLASS ASLI MODELMU
-# Ganti "Iformer_GapNet" dengan nama class yang ada di iformer_gapnet.py
-# ======================================================================
-from models.iformer_gapnet import iFormerGapNet
-from dataset import Dataset
+from models.model import GAPNet 
 
 def get_args():
-    parser = argparse.ArgumentParser(description="Evaluate SOD with PySODMetrics")
-    parser.add_argument('--model_dir', type=str, required=True)
-    parser.add_argument('--out_csv', type=str, default='/kaggle/working/hasil_pysod_skripsi.csv')
-    parser.add_argument('--testsize', type=int, default=352)
+    parser = argparse.ArgumentParser(description="Evaluasi SOD Lengkap")
+    parser.add_argument('--model_dir', type=str, required=True, help="Folder berisi file .pth")
+    parser.add_argument('--out_csv', type=str, default='/kaggle/working/hasil_evaluasi_skripsi.csv')
+    parser.add_argument('--width', type=int, default=384)
+    parser.add_argument('--height', type=int, default=384)
     return parser.parse_args()
 
 def main():
     args = get_args()
     
+    # Daftar dataset (Pastikan path file .txt benar di lingkungan Kaggle Anda)
     datasets = {
         "PASCAL-S": "/kaggle/input/sod-skripsi/PASCAL-S.txt",
         "HKU-IS": "/kaggle/input/sod-skripsi/HKU-IS.txt",
         "ECSSD": "/kaggle/input/sod-skripsi/ECSSD.txt",
         "DUTS-TE": "/kaggle/input/sod-skripsi/DUTS-TE.txt",
-        "DUT-OMRON": "/kaggle/input/sod-skripsi/DUT-OMRON.txt",
-        "DUTS-TR_val_20": "/kaggle/input/datasets/billydawson/partisi-train/DUTS-TR_val_20.txt"
+        "DUT-OMRON": "/kaggle/input/sod-skripsi/DUT-OMRON.txt"
     }
 
     model_paths = sorted(glob.glob(os.path.join(args.model_dir, "*.pth")))
-    if not model_paths:
-        print(f"Error: Tidak ada file .pth di {args.model_dir}")
-        return
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Menggunakan device: {device}")
     
-    # ======================================================================
-    # PENTING: UBAH JUGA DI SINI (Samakan dengan nama Class yang di-import)
-    # ======================================================================
-    model = iFormerGapNet().to(device) 
+    # Inisialisasi model lengkap GAPNet dengan backbone iFormer-Tiny
+    model = GAPNet(arch='iformer_tiny', pretrained=False).to(device)
     model.eval()
 
-    # Buat header CSV
+    # Membuat file CSV dengan header metrik yang diminta
     with open(args.out_csv, mode='w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(['Model_Epoch', 'Dataset', 'F_max', 'F_weighted', 'E_max', 'E_mean', 'S_measure', 'Mean_MAE'])
+        writer.writerow(['Model', 'Dataset', 'MAE', 'F_max', 'F_weighted', 'E_mean', 'E_max', 'S_measure'])
+
+    # Parameter normalisasi standar ImageNet[cite: 1]
+    mean = np.array([0.406, 0.456, 0.485], dtype=np.float32).reshape(1, 1, 3)
+    std = np.array([0.225, 0.224, 0.229], dtype=np.float32).reshape(1, 1, 3)
 
     for epoch_path in model_paths:
-        epoch_name = os.path.basename(epoch_path).replace('.pth', '')
-        print(f"\n{'='*50}\nEvaluasi Model: {epoch_name}\n{'='*50}")
+        epoch_name = os.path.basename(epoch_path)
+        print(f"\n==================== Memproses Model: {epoch_name} ====================")
         
-        from collections import OrderedDict
-
-        # 1. Load state_dict asli dari checkpoint
+        # Membersihkan state_dict dari prefix 'module.'[cite: 1]
         state_dict = torch.load(epoch_path, map_location=device)
-        
-        # 2. Buat dictionary baru untuk menyimpan key yang sudah diperbaiki
-        new_state_dict = OrderedDict()
-        
-        for k, v in state_dict.items():
-            # Hapus prefix 'module.' bawaan dari DataParallel
-            name = k.replace('module.', '')
-            
-            # Hapus duplikasi 'backbone.backbone.' menjadi 'backbone.' saja
-            if name.startswith('backbone.backbone.'):
-                name = name.replace('backbone.backbone.', 'backbone.')
-                
-            new_state_dict[name] = v
-        
-        # 3. Load dictionary yang sudah bersih ke dalam model
-        model.load_state_dict(new_state_dict)
+        new_state_dict = { (k[7:] if k.startswith('module.') else k): v for k, v in state_dict.items() }
+        model.load_state_dict(new_state_dict, strict=True)
 
         for ds_name, ds_txt in datasets.items():
-            image_root = os.path.dirname(ds_txt)
-            gt_root = os.path.dirname(ds_txt)
+            if not os.path.exists(ds_txt):
+                continue
             
-            test_loader = Dataset(image_root, gt_root, testsize=args.testsize)
-            
-            # Inisialisasi Instance PySODMetrics
-            FM = py_sod_metrics.Fmeasure()
-            WFM = py_sod_metrics.WeightedFmeasure()
-            SM = py_sod_metrics.Smeasure()
-            EM = py_sod_metrics.Emeasure()
-            MAE = py_sod_metrics.MAE()
-            
-            with torch.no_grad():
-                for image, gt, name in tqdm(test_loader, desc=f"Testing {ds_name}"):
-                    image = image.to(device)
-                    res = model(image)
-                    
-                    res = F.upsample(res, size=gt.shape[2:], mode='bilinear', align_corners=False)
-                    res = res.sigmoid().data.cpu().numpy().squeeze()
-                    gt_numpy = gt.numpy().squeeze()
-                    
-                    # Konversi array ke format yang dimengerti PySODMetrics
-                    # Prediksi diubah ke rentang 0-255 (float)
-                    pred_np = (res * 255).astype(np.float32)
-                    
-                    # Ground Truth diubah ke binary mask murni (0 atau 255, uint8)
-                    gt_np = (gt_numpy * 255).astype(np.uint8)
-                    gt_np = np.where(gt_np > 128, 255, 0).astype(np.uint8)
-                    
-                    # Beri makan metrik satu per satu
-                    FM.step(pred_np, gt_np)
-                    WFM.step(pred_np, gt_np)
-                    SM.step(pred_np, gt_np)
-                    EM.step(pred_np, gt_np)
-                    MAE.step(pred_np, gt_np)
+            img_gt_pairs = []
+            with open(ds_txt, 'r') as f:
+                for line in f:
+                    img_gt_pairs.append(line.strip().split())
 
-            # Ekstrak hasil dari masing-masing objek PySODMetrics
-            fm_res = FM.get_results()['fm']
-            wfm_res = WFM.get_results()['wfm']
-            sm_res = SM.get_results()['sm']
-            em_res = EM.get_results()['em']
-            mae_res = MAE.get_results()['mae']
+            # Inisialisasi objek metrik dari py_sod_metrics[cite: 1]
+            FM = M.Fmeasure()
+            WFM = M.WeightedFmeasure()
+            SM = M.Smeasure()
+            EM = M.Emeasure()
+            MAE = M.MAE()
+
+            with torch.no_grad():
+                for img_rel, gt_rel in tqdm(img_gt_pairs, desc=f"Dataset {ds_name}"):
+                    # Path dataset (Sesuaikan dengan lokasi root data Anda)
+                    base_data_root = "/kaggle/input/sod-skripsi/"
+                    img_path = os.path.join(base_data_root, img_rel.lstrip('/'))
+                    gt_path = os.path.join(base_data_root, gt_rel.lstrip('/'))
+                    
+                    image = cv2.imread(img_path)
+                    gt = cv2.imread(gt_path, 0)
+                    if image is None or gt is None: continue
+                    
+                    orig_h, orig_w = image.shape[:2]
+                    
+                    # Preprocessing: Resize, Normalisasi, dan Transpose[cite: 1]
+                    img_input = cv2.resize(image, (args.width, args.height))
+                    img_input = img_input.astype(np.float32) / 255.
+                    img_input = (img_input - mean) / std
+                    img_input = img_input[:, :, ::-1].transpose((2, 0, 1)) # BGR to RGB
+                    img_tensor = torch.from_numpy(img_input).unsqueeze(0).to(device)
+
+                    # Inference: Ambil channel 0 sebagai hasil prediksi utama[cite: 1]
+                    res = model(img_tensor)
+                    pred_map = res[:, 0, :, :].unsqueeze(1)
+                    pred_map = F.interpolate(pred_map, size=(orig_h, orig_w), mode='bilinear', align_corners=False)
+                    pred_np = (pred_map.squeeze().cpu().numpy() * 255).astype(np.uint8)
+
+                    # Update metrik[cite: 1]
+                    FM.step(pred=pred_np, gt=gt)
+                    WFM.step(pred=pred_np, gt=gt)
+                    SM.step(pred=pred_np, gt=gt)
+                    EM.step(pred=pred_np, gt=gt)
+                    MAE.step(pred=pred_np, gt=gt)
+
+            # Ekstraksi hasil akhir metrik[cite: 1]
+            fm_results = FM.get_results()['fm']
+            em_results = EM.get_results()['em']
             
-            # Pengambilan nilai yang spesifik
-            f_max = fm_res['curve'].max()
-            f_w = wfm_res
-            e_max = em_res['curve'].max()
-            e_mean = em_res['curve'].mean()
-            s_m = sm_res
-            mae_m = mae_res
-            
+            row = [
+                epoch_name, 
+                ds_name,
+                f"{MAE.get_results()['mae']:.4f}",               # MAE
+                f"{fm_results['curve'].max():.4f}",              # F-max
+                f"{WFM.get_results()['wfm']:.4f}",               # F-weighted
+                f"{em_results['curve'].mean():.4f}",             # E-mean
+                f"{em_results['curve'].max():.4f}",              # E-max
+                f"{SM.get_results()['sm']:.4f}"                  # S-measure
+            ]
+
             with open(args.out_csv, mode='a', newline='') as file:
                 writer = csv.writer(file)
-                writer.writerow([
-                    epoch_name, ds_name, 
-                    f"{f_max:.4f}", 
-                    f"{f_w:.4f}", 
-                    f"{e_max:.4f}",
-                    f"{e_mean:.4f}",
-                    f"{s_m:.4f}",
-                    f"{mae_m:.4f}"
-                ])
+                writer.writerow(row)
 
-    print(f"\nUji hipotesis selesai! Hasil bisa didownload di: {args.out_csv}")
+    print(f"\nEvaluasi selesai! Hasil disimpan di: {args.out_csv}")
 
 if __name__ == "__main__":
     main()
