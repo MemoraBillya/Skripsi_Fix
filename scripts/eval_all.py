@@ -69,11 +69,17 @@ def main():
                 for line in f:
                     img_gt_pairs.append(line.strip().split())
 
-            # Inisialisasi objek metrik dari py_sod_metrics[cite: 1]
+            # Inisialisasi Instance PySODMetrics dengan Handler (Wajib untuk versi terbaru)
+            # Gunakan FmeasureV2 dan EmeasureV2 agar lebih stabil
             FM = M.FmeasureV2()
+            FM.add_handler(M.FmHandler())  # Handler untuk F-max & F-mean
+            
+            EM = M.EmeasureV2()
+            EM.add_handler(M.EmHandler())  # Handler untuk E-max & E-mean
+            
+            # Metrik berikut tidak memerlukan handler tambahan
             WFM = M.WeightedFmeasure()
             SM = M.Smeasure()
-            EM = M.Emeasure()
             MAE = M.MAE()
 
             with torch.no_grad():
@@ -110,18 +116,31 @@ def main():
                     MAE.step(pred=pred_np, gt=gt)
 
             # Ekstraksi hasil akhir metrik[cite: 1]
-            fm_results = FM.get_results()['fm']
-            em_results = EM.get_results()['em']
+            # Ekstrak hasil dari masing-masing objek
+            # Pastikan key 'fm' dan 'em' sesuai dengan handler yang ditambahkan
+            fm_res = FM.get_results()['fm'] 
+            em_res = EM.get_results()['em']
+            wfm_res = WFM.get_results()['wfm']
+            sm_res = SM.get_results()['sm']
+            mae_res = MAE.get_results()['mae']
+            
+            # Ambil nilai spesifik untuk CSV
+            f_max = fm_res['curve'].max()
+            f_w = wfm_res
+            e_max = em_res['curve'].max()
+            e_mean = em_res['curve'].mean()
+            s_m = sm_res
+            mae_m = mae_res
             
             row = [
                 epoch_name, 
                 ds_name,
-                f"{MAE.get_results()['mae']:.4f}",               # MAE
-                f"{fm_results['curve'].max():.4f}",              # F-max
-                f"{WFM.get_results()['wfm']:.4f}",               # F-weighted
-                f"{em_results['curve'].mean():.4f}",             # E-mean
-                f"{em_results['curve'].max():.4f}",              # E-max
-                f"{SM.get_results()['sm']:.4f}"                  # S-measure
+                f"{mae_m:.4f}",       # Gunakan variabel hasil ekstraksi di atas
+                f"{f_max:.4f}",       # Gunakan f_max yang sudah di-max()
+                f"{f_w:.4f}",         # F-weighted
+                f"{e_mean:.4f}",      # E-mean
+                f"{e_max:.4f}",       # E-max
+                f"{s_m:.4f}"          # S-measure
             ]
 
             with open(args.out_csv, mode='a', newline='') as file:
