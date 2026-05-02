@@ -61,7 +61,26 @@ def main():
         epoch_name = os.path.basename(epoch_path).replace('.pth', '')
         print(f"\n{'='*50}\nEvaluasi Model: {epoch_name}\n{'='*50}")
         
-        model.load_state_dict(torch.load(epoch_path, map_location=device))
+        from collections import OrderedDict
+
+        # 1. Load state_dict asli dari checkpoint
+        state_dict = torch.load(epoch_path, map_location=device)
+        
+        # 2. Buat dictionary baru untuk menyimpan key yang sudah diperbaiki
+        new_state_dict = OrderedDict()
+        
+        for k, v in state_dict.items():
+            # Hapus prefix 'module.' bawaan dari DataParallel
+            name = k.replace('module.', '')
+            
+            # Hapus duplikasi 'backbone.backbone.' menjadi 'backbone.' saja
+            if name.startswith('backbone.backbone.'):
+                name = name.replace('backbone.backbone.', 'backbone.')
+                
+            new_state_dict[name] = v
+        
+        # 3. Load dictionary yang sudah bersih ke dalam model
+        model.load_state_dict(new_state_dict)
 
         for ds_name, ds_txt in datasets.items():
             image_root = os.path.dirname(ds_txt)
