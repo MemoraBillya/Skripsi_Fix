@@ -168,7 +168,7 @@ def val(args, val_loader, model, criterion):
         target_squeezed = target_var[:, 0, :, :].squeeze(1) if len(target_var.shape) == 4 else target_var.squeeze(1)
         
         preds = (output[:, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
-        gts = target_squeezed.cpu().numpy().astype(np.uint8)
+        gts = (target_squeezed.cpu().numpy() * 255).astype(np.uint8)
         
         if len(preds.shape) == 2:
             preds = np.expand_dims(preds, axis=0)
