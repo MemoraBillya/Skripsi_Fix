@@ -91,33 +91,82 @@ class CEOLoss(nn.Module):
         return sum(loss_overall)/len(loss_overall)*3
 
 
+# @torch.no_grad()
+# def val(args, val_loader, model, criterion):
+#     model.eval()
+#     sal_eval_val = SalEval()
+#     SM = M.Smeasure()
+#     EM = M.Emeasure()
+    
+#     epoch_loss = []
+#     bar = tqdm(val_loader, desc="Validating")
+
+#     for iter, (input, target) in enumerate(bar):
+#         input_var = input.to(device)
+#         target_var = target.to(device).float()
+
+#         output = model(input_var)
+        
+#         # FIX: Squeeze target_var agar dimensinya 3D [Batch, H, W]
+#         target_squeezed = target_var.squeeze(1) 
+
+#         # Hitung Val Loss dengan membuang dimensi channel yang tidak diperlukan
+#         loss = criterion.criterion(output[:, 0, :, :], target_squeezed) / args.iter_size
+#         epoch_loss.append(loss.item())
+
+#         # F-beta & MAE
+#         sal_eval_val.add_batch(output[:, 0, :, :], target_var)
+        
+#         # S-Measure & E-Measure
+#         preds = (output[:, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
+#         gts = target_squeezed.cpu().numpy().astype(np.uint8)
+        
+#         if len(preds.shape) == 2:
+#             preds = np.expand_dims(preds, axis=0)
+#             gts = np.expand_dims(gts, axis=0)
+            
+#         for i in range(preds.shape[0]):
+#             SM.step(preds[i], gts[i])
+#             EM.step(preds[i], gts[i])
+
+#         if iter % 10 == 0:
+#             bar.set_description(f"Val Loss: {sum(epoch_loss) / len(epoch_loss):.5f}")
+
+#     average_epoch_loss_val = sum(epoch_loss) / len(epoch_loss)
+#     F_beta, MAE = sal_eval_val.get_metric()
+#     S_measure = SM.get_results()['sm']
+#     E_measure = EM.get_results()['em']['curve'].max()
+
+#     return average_epoch_loss_val, F_beta, MAE, S_measure, E_measure
+
 @torch.no_grad()
 def val(args, val_loader, model, criterion):
     model.eval()
-    sal_eval_val = SalEval()
+    
+    # Inisialisasi PySODMetrics
+    FM = M.Fmeasure()
+    WFM = M.WeightedFmeasure()
     SM = M.Smeasure()
     EM = M.Emeasure()
+    MAE_metric = M.MAE()
     
     epoch_loss = []
     bar = tqdm(val_loader, desc="Validating")
-
+    
     for iter, (input, target) in enumerate(bar):
         input_var = input.to(device)
         target_var = target.to(device).float()
-
+        
         output = model(input_var)
         
-        # FIX: Squeeze target_var agar dimensinya 3D [Batch, H, W]
-        target_squeezed = target_var.squeeze(1) 
-
-        # Hitung Val Loss dengan membuang dimensi channel yang tidak diperlukan
-        loss = criterion.criterion(output[:, 0, :, :], target_squeezed) / args.iter_size
+        # PERHITUNGAN LOSS (SAMA DENGAN TRAIN)
+        # Menghitung loss menggunakan seluruh level output dan target (granularitas penuh)
+        loss = criterion(output, target_var) / args.iter_size
         epoch_loss.append(loss.item())
-
-        # F-beta & MAE
-        sal_eval_val.add_batch(output[:, 0, :, :], target_var)
         
-        # S-Measure & E-Measure
+        # Squeeze target_var untuk mengambil label mask asli di channel 0
+        target_squeezed = target_var[:, 0, :, :].squeeze(1) if len(target_var.shape) == 4 else target_var.squeeze(1)
+        
         preds = (output[:, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
         gts = target_squeezed.cpu().numpy().astype(np.uint8)
         
@@ -126,18 +175,29 @@ def val(args, val_loader, model, criterion):
             gts = np.expand_dims(gts, axis=0)
             
         for i in range(preds.shape[0]):
+            FM.step(preds[i], gts[i])
+            WFM.step(preds[i], gts[i])
             SM.step(preds[i], gts[i])
             EM.step(preds[i], gts[i])
-
+            MAE_metric.step(preds[i], gts[i])
+            
         if iter % 10 == 0:
             bar.set_description(f"Val Loss: {sum(epoch_loss) / len(epoch_loss):.5f}")
-
+            
     average_epoch_loss_val = sum(epoch_loss) / len(epoch_loss)
-    F_beta, MAE = sal_eval_val.get_metric()
-    S_measure = SM.get_results()['sm']
-    E_measure = EM.get_results()['em']['curve'].max()
-
-    return average_epoch_loss_val, F_beta, MAE, S_measure, E_measure
+    
+    # Ekstrak seluruh hasil metrik
+    fm_res = FM.get_results()['fm']
+    em_res = EM.get_results()['em']
+    
+    F_max = fm_res['curve'].max()
+    F_w = WFM.get_results()['wfm']
+    S_m = SM.get_results()['sm']
+    E_max = em_res['curve'].max()
+    E_mean = em_res['curve'].mean()
+    MAE_val = MAE_metric.get_results()['mae']
+    
+    return average_epoch_loss_val, F_max, F_w, S_m, E_max, E_mean, MAE_val
 
 
 def train(args, train_loader, model, criterion, optimizer, epoch, max_batches, cur_iter=0):
@@ -325,10 +385,12 @@ def train_validate_saliency(args):
     
     hist_train_loss = []
     hist_val_loss = []
-    hist_val_fbeta = []
-    hist_val_mae = []
+    hist_val_fmax = []
+    hist_val_fw = []
     hist_val_smeasure = []
-    hist_val_emeasure = []
+    hist_val_emax = []
+    hist_val_emean = []
+    hist_val_mae = []
 
     # =========================================================================
     # SINGLE CLEAN TRAINING LOOP 
@@ -352,16 +414,19 @@ def train_validate_saliency(args):
         cur_iter += len(trainLoader_main)
         torch.cuda.empty_cache()
 
-        # 3. Evaluasi Validasi
+       # 3. Evaluasi Validasi
         print(f"\nStart to evaluate on epoch {epoch+1}")
         start_time = time.time()
-        loss_val, F_beta_val, MAE_val, S_m_val, E_m_val = val(args, valLoader, model, criteria)
+        
+        loss_val, F_max_val, F_w_val, S_m_val, E_max_val, E_mean_val, MAE_val = val(args, valLoader, model, criteria)
         
         hist_val_loss.append(loss_val)
-        hist_val_fbeta.append(F_beta_val)
-        hist_val_mae.append(MAE_val)
+        hist_val_fmax.append(F_max_val)
+        hist_val_fw.append(F_w_val)
         hist_val_smeasure.append(S_m_val)
-        hist_val_emeasure.append(E_m_val)
+        hist_val_emax.append(E_max_val)
+        hist_val_emean.append(E_mean_val)
+        hist_val_mae.append(MAE_val)
         
         print(f"Elapsed evaluation time: {(time.time()-start_time)/3600.0:.4f} hours")
         torch.cuda.empty_cache()
@@ -373,19 +438,19 @@ def train_validate_saliency(args):
             'state_dict': model.state_dict(),
             'optimizer': optimizer.state_dict(),
             'loss_val': loss_val,
-            'iou_val': F_beta_val,
+            'f_max_val': F_max_val,
         }, args.savedir + 'checkpoint.pth.tar')
-
+        
         if epoch > args.max_epochs * 0.5:
             model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
             torch.save(model.state_dict(), model_file_name)
 
         # 5. Penulisan Log yang Bersih 
-        log_str = f"Epoch {epoch+1:03d}\tTr_Loss(s1,s2,main): {loss_train_s1:.4f}, {loss_train_s2:.4f}, {loss_train_main:.4f}\tVal_Loss: {loss_val:.4f}\tF_beta: {F_beta_val:.4f}\tMAE: {MAE_val:.4f}\tS_m: {S_m_val:.4f}\tE_m: {E_m_val:.4f}"
+        log_str = f"Epoch {epoch+1:03d}\tTr_Loss: {loss_train_main:.4f}\tVal_Loss: {loss_val:.4f}\tF_max: {F_max_val:.4f}\tF_w: {F_w_val:.4f}\tS_m: {S_m_val:.4f}\tE_max: {E_max_val:.4f}\tE_mean: {E_mean_val:.4f}\tMAE: {MAE_val:.4f}"
         logger.write(log_str + "\n")
         logger.flush()
         
-        print(f"Epoch {epoch+1} Results -> Train Loss: {loss_train_main:.4f} | Val Loss: {loss_val:.4f} | MAE: {MAE_val:.4f} | F_beta: {F_beta_val:.4f} | S-m: {S_m_val:.4f} | E-m: {E_m_val:.4f}\n")
+        print(f"Epoch {epoch+1} Results -> Val Loss: {loss_val:.4f} | F_max: {F_max_val:.4f} | F_w: {F_w_val:.4f} | S-m: {S_m_val:.4f} | E-max: {E_max_val:.4f} | E-mean: {E_mean_val:.4f} | MAE: {MAE_val:.4f}\n")
 
 
     # =========================================================================
@@ -416,11 +481,13 @@ def train_validate_saliency(args):
     plt.savefig(args.savedir + 'curve_mae.png', dpi=300)
     plt.close()
 
-    # Plot 3: Kinerja F-beta, S-measure, E-measure
-    plt.figure(figsize=(8, 6))
-    plt.plot(epochs_range, hist_val_fbeta, 'm-', label='F-beta')
+    # Plot 3: Kinerja F-measure, S-measure, E-measure
+    plt.figure(figsize=(10, 6))
+    plt.plot(epochs_range, hist_val_fmax, 'm-', label='F-measure Max')
+    plt.plot(epochs_range, hist_val_fw, 'm--', label='F-measure Weighted')
     plt.plot(epochs_range, hist_val_smeasure, 'c-', label='S-measure')
-    plt.plot(epochs_range, hist_val_emeasure, 'y-', label='E-measure')
+    plt.plot(epochs_range, hist_val_emax, 'y-', label='E-measure Max')
+    plt.plot(epochs_range, hist_val_emean, 'y--', label='E-measure Mean')
     plt.title('Validation Metrics over Epochs')
     plt.xlabel('Epochs')
     plt.ylabel('Score')
