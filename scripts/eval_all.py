@@ -1,130 +1,216 @@
 import os
-import sys
-import glob
-import csv
-import argparse
+import shutil
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from tqdm import tqdm
 import cv2
+cv2.setNumThreads(0)
+cv2.ocl.setUseOpenCL(False)
+
+from tqdm import tqdm
+from models import model as net
+from dataset import Dataset
+import transforms as myTransforms
 import py_sod_metrics as M
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from models.model import GAPNet 
+# =========================================================================
+# FUNGSI LOSS (Identik dengan Training agar Val Loss Akurat)
+# =========================================================================
+def BCEDiceLoss(inputs, targets, ignore_index=False):
+    bce = CrossEntropyLoss(inputs, targets, ignore_index)
+    inter = (inputs * targets).sum()
+    eps = 1e-5
+    dice = (2 * inter + eps) / (inputs.sum() + targets.sum() + eps)
+    return bce + 1 - dice
 
-def get_args():
-    parser = argparse.ArgumentParser(description="Evaluasi SOD Lengkap")
-    parser.add_argument('--model_dir', type=str, required=True)
-    parser.add_argument('--out_csv', type=str, default='/kaggle/working/hasil_evaluasi_skripsi.csv')
-    parser.add_argument('--width', type=int, default=384)
-    parser.add_argument('--height', type=int, default=384)
-    return parser.parse_args()
+def CrossEntropyLoss(inputs, targets, ignore_index=False):
+    index = [i for i in range(targets.size()[0]) if not torch.all(targets[i] == 10)]
+    targets = targets[index, :, :]
+    inputs = inputs[index, :, :]
 
-def main():
-    args = get_args()
-    datasets = {
-        "PASCAL-S": "/kaggle/input/sod-skripsi/PASCAL-S.txt",
-        "HKU-IS": "/kaggle/input/sod-skripsi/HKU-IS.txt",
-        "ECSSD": "/kaggle/input/sod-skripsi/ECSSD.txt",
-        "DUTS-TE": "/kaggle/input/sod-skripsi/DUTS-TE.txt",
-        "DUT-OMRON": "/kaggle/input/sod-skripsi/DUT-OMRON.txt"
-    }
+    if ignore_index:
+        valid_mask = (targets != 255)
+        targets_valid = targets.clone()
+        targets_valid[targets == 255] = 0
+        BCE_func = nn.BCELoss(reduction='none')
+        bce = BCE_func(inputs, targets_valid)
+        bce = bce * valid_mask
+        bce = torch.sum(bce) / (torch.sum(valid_mask) + 1e-8)  
+    else:
+        bce = F.binary_cross_entropy(inputs, targets)
+    return bce
 
-    model_paths = sorted(glob.glob(os.path.join(args.model_dir, "*.pth")))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    model = GAPNet(arch='iformer_tiny', pretrained=False).to(device)
+class CEOLoss(nn.Module):
+    def __init__(self, criterion=BCEDiceLoss, ignore_index=False, supervision=8):
+        super(CEOLoss, self).__init__()
+        self.criterion = criterion
+        self.ignore_index = ignore_index
+        self.supervision = supervision
+
+    def forward(self, inputs, targets):
+        criterion = self.criterion
+        losses = []
+        for i in [0, 1, 2, 5]:
+            losses.append(criterion(inputs[:, i, :, :], targets[:, i, :, :], ignore_index=False))
+        for i in range(3, 5):
+            losses.insert(i, criterion(inputs[:, i, :, :], targets[:, i, :, :], ignore_index=self.ignore_index))
+
+        if self.supervision == 8:
+            losses[3] = criterion(inputs[:, 3, :, :], targets[:, 2, :, :], ignore_index=False)
+            loss_overall = losses[:1] + losses[3:5]
+        else:
+            loss_overall = losses[:1] + losses[3:5]
+        return sum(loss_overall)/len(loss_overall)*3
+
+# =========================================================================
+# FUNGSI EVALUASI
+# =========================================================================
+@torch.no_grad()
+def evaluate_dataset(model, dataloader, criterion=None, calc_loss=False, device='cuda'):
     model.eval()
-
-    with open(args.out_csv, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(['Model', 'Dataset', 'MAE', 'F_max', 'F_weighted', 'E_mean', 'E_max', 'S_measure'])
-
-    mean = np.array([0.406, 0.456, 0.485], dtype=np.float32).reshape(1, 1, 3)
-    std = np.array([0.225, 0.224, 0.229], dtype=np.float32).reshape(1, 1, 3)
-
-    for epoch_path in model_paths:
-        epoch_name = os.path.basename(epoch_path)
-        print(f"\n==================== Memproses Model: {epoch_name} ====================")
+    
+    FM = M.Fmeasure()
+    WFM = M.WeightedFmeasure()
+    SM = M.Smeasure()
+    EM = M.Emeasure()
+    MAE_metric = M.MAE()
+    
+    epoch_loss = []
+    bar = tqdm(dataloader, leave=False)
+    
+    for iter, (input_tensor, target_tensor) in enumerate(bar):
+        input_var = input_tensor.to(device)
+        target_var = target_tensor.to(device).float()
         
-        state_dict = torch.load(epoch_path, map_location=device)
-        new_state_dict = {}
-        for k, v in state_dict.items():
-            # Hanya tangani awalan 'module.' akibat DataParallel
-            name = k[7:] if k.startswith('module.') else k
-            new_state_dict[name] = v
+        output = model(input_var)
+        
+        # 1. Hitung Loss (HANYA JIKA DIMINTA - KHUSUS VAL SET)
+        if calc_loss and criterion is not None:
+            # Perhitungan loss granular menggunakan semua level mask
+            loss = criterion(output, target_var)
+            epoch_loss.append(loss.item())
+            bar.set_description(f"Loss: {sum(epoch_loss) / len(epoch_loss):.4f}")
+        
+        # 2. Hitung Metrik (Hanya butuh mask level 0)
+        target_squeezed = target_var[:, 0, :, :].squeeze(1) if len(target_var.shape) == 4 else target_var.squeeze(1)
+        preds = (output[:, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
+        gts = (target_squeezed.cpu().numpy() * 255).astype(np.uint8)
+        
+        if len(preds.shape) == 2:
+            preds = np.expand_dims(preds, axis=0)
+            gts = np.expand_dims(gts, axis=0)
             
-        # Memuat state dictionary yang sudah dibersihkan
-        model.load_state_dict(new_state_dict, strict=True)
-
-        for ds_name, ds_txt in datasets.items():
-            if not os.path.exists(ds_txt): continue
+        for i in range(preds.shape[0]):
+            FM.step(preds[i], gts[i])
+            WFM.step(preds[i], gts[i])
+            SM.step(preds[i], gts[i])
+            EM.step(preds[i], gts[i])
+            MAE_metric.step(preds[i], gts[i])
             
-            img_gt_pairs = []
-            with open(ds_txt, 'r') as f:
-                for line in f:
-                    img_gt_pairs.append(line.strip().split())
+    # Rekap Hasil
+    avg_loss = sum(epoch_loss) / len(epoch_loss) if calc_loss else 0.0
+    
+    fm_res = FM.get_results()['fm']
+    em_res = EM.get_results()['em']
+    
+    res = {
+        'loss': avg_loss,
+        'F_max': fm_res['curve'].max(),
+        'F_w': WFM.get_results()['wfm'],
+        'S_m': SM.get_results()['sm'],
+        'E_max': em_res['curve'].max(),
+        'E_mean': em_res['curve'].mean(),
+        'MAE': MAE_metric.get_results()['mae']
+    }
+    return res
 
-            # CARA INISIALISASI TERAMAN (Constructor-based)
-            FM = M.Fmeasure()
-            WFM = M.WeightedFmeasure()
-            SM = M.Smeasure()
-            EM = M.Emeasure()
-            MAE = M.MAE()
+# =========================================================================
+# EKSEKUSI UTAMA
+# =========================================================================
+def main():
+    # --- KONFIGURASI PATH ---
+    data_dir = '/kaggle/working/data/'
+    
+    # Folder tempat model 1-30 Anda berada (Bisa dibaca)
+    model_dir = '/kaggle/input/datasets/billydawson/allepochs-bs32-lr1-7e-4/' 
+    
+    # Folder tempat menyimpan hasil evaluasi (Harus di /working/ agar bisa ditulis)
+    output_dir = '/kaggle/working/' 
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = net.GAPNet(arch='iformer_tiny', pretrained=False).to(device)
+    
+    # Jika model dilatih pakai DataParallel, bungkus modelnya juga di sini
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
 
-            with torch.no_grad():
-                for img_rel, gt_rel in tqdm(img_gt_pairs, desc=f"{ds_name}"):
-                    base_data_root = "/kaggle/input/sod-skripsi/"
-                    img_path = os.path.join(base_data_root, img_rel.lstrip('/'))
-                    gt_path = os.path.join(base_data_root, gt_rel.lstrip('/'))
-                    
-                    image = cv2.imread(img_path)
-                    gt = cv2.imread(gt_path, 0)
-                    if image is None or gt is None: continue
-                    
-                    orig_h, orig_w = image.shape[:2]
-                    img_input = cv2.resize(image, (args.width, args.height))
-                    img_input = img_input.astype(np.float32) / 255.
-                    img_input = (img_input - mean) / std
-                    img_input = img_input[:, :, ::-1].copy().transpose((2, 0, 1)) 
-                    img_tensor = torch.from_numpy(img_input).unsqueeze(0).to(device)
+    criteria = CEOLoss(criterion=BCEDiceLoss, supervision=8)
+    
+    # Dataset Transforms
+    NORMALISE_PARAMS = [np.array([0.406, 0.456, 0.485], dtype=np.float32).reshape((1, 1, 3)), 
+                        np.array([0.225, 0.224, 0.229], dtype=np.float32).reshape((1, 1, 3))]
+    valDataset = myTransforms.Compose([
+        myTransforms.Normalize(*NORMALISE_PARAMS),
+        myTransforms.Scale(384, 384),
+        myTransforms.ToTensor()
+    ])
 
-                    res = model(img_tensor)
-                    pred_map = res[:, 0, :, :].unsqueeze(1)
-                    pred_map = F.interpolate(pred_map, size=(orig_h, orig_w), mode='bilinear', align_corners=False)
-                    pred_np = (pred_map.squeeze().cpu().numpy() * 255).astype(np.uint8)
+    # Pastikan file partisi val disalin ke folder data
+    partisi_val_path = '/kaggle/input/datasets/billydawson/partisi-train/DUTS-TR_val_20.txt'
+    if os.path.exists(partisi_val_path):
+        shutil.copy(partisi_val_path, os.path.join(data_dir, 'DUTS-TR-VAL.lst'))
+    
+    # --- INISIALISASI DATALOADER ---
+    # 1. Loader Validasi (process_label=True untuk hitung Loss Granular)
+    valLoader = torch.utils.data.DataLoader(
+        Dataset(data_dir, 'DUTS-TR-VAL', transform=valDataset, process_label=True),
+        batch_size=4, shuffle=False, num_workers=0, pin_memory=True) # BATCH KECIL & WORKER 0 (SUPER AMAN)
 
-                    # Pastikan binary mask GT bersih
-                    if np.max(gt) > 1:
-                        gt = (gt > 128).astype(np.uint8) * 255
+    # 2. Loader Benchmark Test (process_label=False karena tidak hitung Loss)
+    test_names = ["DUTS-TE", "DUT-OMRON", "HKU-IS", "ECSSD", "PASCAL-S"]
+    testLoaders = {}
+    for t_name in test_names:
+        testLoaders[t_name] = torch.utils.data.DataLoader(
+            Dataset(data_dir, t_name, transform=valDataset, process_label=False),
+            batch_size=4, shuffle=False, num_workers=0, pin_memory=True)
 
-                    FM.step(pred=pred_np, gt=gt)
-                    WFM.step(pred=pred_np, gt=gt)
-                    SM.step(pred=pred_np, gt=gt)
-                    EM.step(pred=pred_np, gt=gt)
-                    MAE.step(pred=pred_np, gt=gt)
+    # Buka file log untuk mencatat hasil eval
+    log_eval = open(os.path.join(output_dir, 'evaluation_results.txt'), 'w')
 
-            # --- EKSTRAKSI & PENAMAAN VARIABEL YANG KONSISTEN ---
-            fm_results_final = FM.get_results()['fm'] 
-            em_results_final = EM.get_results()['em']
+    print("Memulai Evaluasi Offline (Epoch 1 - 30)...\n")
+    
+    # Loop Evaluasi setiap Epoch
+    for epoch in range(1, 31):
+        # Ambil model dari model_dir
+        model_path = os.path.join(model_dir, f'model_{epoch}.pth')
+        
+        if not os.path.exists(model_path):
+            print(f"Model epoch {epoch} tidak ditemukan di {model_path}, melewati...")
+            continue
             
-            row = [
-                epoch_name, 
-                ds_name,
-                f"{MAE.get_results()['mae']:.4f}",
-                f"{fm_results_final['curve'].max():.4f}", # F-max
-                f"{WFM.get_results()['wfm']:.4f}",       # F-weighted
-                f"{em_results_final['curve'].mean():.4f}", # E-mean
-                f"{em_results_final['curve'].max():.4f}",  # E-max
-                f"{SM.get_results()['sm']:.4f}"          # S-measure
-            ]
+        # Load bobot
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        print(f"\n=======================================================")
+        print(f"🚀 Evaluasi Model Epoch {epoch}")
+        
+        # --- 1. Evaluasi Validation Set ---
+        print(">> Dataset Validasi (DUTS-TR Val 20%) -> Menghitung Loss & Metrik...")
+        val_res = evaluate_dataset(model, valLoader, criteria, calc_loss=True, device=device)
+        val_log = f"Epoch {epoch} [VAL] -> Loss: {val_res['loss']:.4f} | F-max: {val_res['F_max']:.4f} | MAE: {val_res['MAE']:.4f}"
+        print(val_log)
+        log_eval.write(val_log + "\n")
+        
+        # --- 2. Evaluasi Test Sets ---
+        for t_name in test_names:
+            print(f">> Benchmark: {t_name} -> Menghitung Metrik...")
+            t_res = evaluate_dataset(model, testLoaders[t_name], criterion=None, calc_loss=False, device=device)
+            t_log = f"          [{t_name}] -> F-max: {t_res['F_max']:.4f} | F-w: {t_res['F_w']:.4f} | S-m: {t_res['S_m']:.4f} | MAE: {t_res['MAE']:.4f}"
+            print(t_log)
+            log_eval.write(t_log + "\n")
+            
+    log_eval.close()
+    print("\n✅ Seluruh proses evaluasi offline selesai! Hasil tersimpan di evaluation_results.txt")
 
-            with open(args.out_csv, mode='a', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(row)
-
-    print(f"\nEvaluasi selesai! Hasil disimpan di: {args.out_csv}")
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
