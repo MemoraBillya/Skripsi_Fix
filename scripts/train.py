@@ -313,18 +313,15 @@ def train_validate_saliency(args):
 
     trainLoader_main = torch.utils.data.DataLoader(
         Dataset(args.data_dir, 'DUTS-TR', transform=trainDataset_main, process_label=True, ignore_index=args.igi),
-        batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=True,
-        persistent_workers=True)
+        batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=True)
 
     trainLoader_scale1 = torch.utils.data.DataLoader(
         Dataset(args.data_dir, 'DUTS-TR', transform=trainDataset_scale1, process_label=True, ignore_index=args.igi),
-        batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=True,
-        persistent_workers=True)
+        batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=True)
         
     trainLoader_scale2 = torch.utils.data.DataLoader(
         Dataset(args.data_dir, 'DUTS-TR', transform=trainDataset_scale2, process_label=True, ignore_index=args.igi),
-        batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=True,
-        persistent_workers=True)
+        batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=True)
 
     valLoader = torch.utils.data.DataLoader(
         Dataset(args.data_dir, val_names[0], transform=valDataset, process_label=True, ignore_index=args.igi),
