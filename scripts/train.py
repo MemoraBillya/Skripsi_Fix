@@ -353,18 +353,22 @@ def train_validate_saliency(args):
         torch.cuda.empty_cache()
 
         # 3. Evaluasi Validasi
-        print(f"\nStart to evaluate on epoch {epoch+1}")
-        start_time = time.time()
-        loss_val, F_beta_val, MAE_val, S_m_val, E_m_val = val(args, valLoader, model, criteria)
+        # print(f"\nStart to evaluate on epoch {epoch+1}")
+        # start_time = time.time()
+        # loss_val, F_beta_val, MAE_val, S_m_val, E_m_val = val(args, valLoader, model, criteria)
         
-        hist_val_loss.append(loss_val)
-        hist_val_fbeta.append(F_beta_val)
-        hist_val_mae.append(MAE_val)
-        hist_val_smeasure.append(S_m_val)
-        hist_val_emeasure.append(E_m_val)
+        # hist_val_loss.append(loss_val)
+        # hist_val_fbeta.append(F_beta_val)
+        # hist_val_mae.append(MAE_val)
+        # hist_val_smeasure.append(S_m_val)
+        # hist_val_emeasure.append(E_m_val)
         
-        print(f"Elapsed evaluation time: {(time.time()-start_time)/3600.0:.4f} hours")
-        torch.cuda.empty_cache()
+        # print(f"Elapsed evaluation time: {(time.time()-start_time)/3600.0:.4f} hours")
+        # torch.cuda.empty_cache()
+
+        # 3. Evaluasi Validasi (DIMATIKAN UNTUK TRAINING ONLY)
+        # Buat variabel dummy 0.0 agar fungsi save dan log di bawahnya tidak crash
+        loss_val = F_beta_val = MAE_val = S_m_val = E_m_val = 0.0
 
         # 4. Simpan Checkpoint
         torch.save({
@@ -376,16 +380,16 @@ def train_validate_saliency(args):
             'iou_val': F_beta_val,
         }, args.savedir + 'checkpoint.pth.tar')
 
-        if epoch > args.max_epochs * 0.5:
-            model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
-            torch.save(model.state_dict(), model_file_name)
+        # SYARAT 0.5 DIHAPUS: Simpan model dari epoch 1 sampai 30
+        model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
+        torch.save(model.state_dict(), model_file_name)
 
-        # 5. Penulisan Log yang Bersih 
-        log_str = f"Epoch {epoch+1:03d}\tTr_Loss(s1,s2,main): {loss_train_s1:.4f}, {loss_train_s2:.4f}, {loss_train_main:.4f}\tVal_Loss: {loss_val:.4f}\tF_beta: {F_beta_val:.4f}\tMAE: {MAE_val:.4f}\tS_m: {S_m_val:.4f}\tE_m: {E_m_val:.4f}"
+        # 5. Penulisan Log yang Bersih (Menampilkan Train Loss saja agar rapi)
+        log_str = f"Epoch {epoch+1:03d}\tTr_Loss(s1,s2,main): {loss_train_s1:.4f}, {loss_train_s2:.4f}, {loss_train_main:.4f}\t(Validasi Offline)"
         logger.write(log_str + "\n")
         logger.flush()
         
-        print(f"Epoch {epoch+1} Results -> Train Loss: {loss_train_main:.4f} | Val Loss: {loss_val:.4f} | MAE: {MAE_val:.4f} | F_beta: {F_beta_val:.4f} | S-m: {S_m_val:.4f} | E-m: {E_m_val:.4f}\n")
+        print(f"Epoch {epoch+1} Results -> Train Loss: {loss_train_main:.4f} | Model Tersimpan!\n")
 
 
     # =========================================================================
@@ -393,43 +397,43 @@ def train_validate_saliency(args):
     # =========================================================================
     epochs_range = range(1, len(hist_train_loss) + 1)
     
-    # Plot 1: Loss
-    plt.figure(figsize=(8, 6))
-    plt.plot(epochs_range, hist_train_loss, 'b-', label='Train Loss (Main Scale)')
-    plt.plot(epochs_range, hist_val_loss, 'r-', label='Val Loss')
-    plt.title('Training and Validation Loss')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(args.savedir + 'curve_loss.png', dpi=300)
-    plt.close()
+    # # Plot 1: Loss
+    # plt.figure(figsize=(8, 6))
+    # plt.plot(epochs_range, hist_train_loss, 'b-', label='Train Loss (Main Scale)')
+    # plt.plot(epochs_range, hist_val_loss, 'r-', label='Val Loss')
+    # plt.title('Training and Validation Loss')
+    # plt.xlabel('Epochs')
+    # plt.ylabel('Loss')
+    # plt.legend()
+    # plt.grid(True)
+    # plt.savefig(args.savedir + 'curve_loss.png', dpi=300)
+    # plt.close()
 
-    # Plot 2: MAE
-    plt.figure(figsize=(8, 6))
-    plt.plot(epochs_range, hist_val_mae, 'g-', label='Validation MAE')
-    plt.title('Validation MAE over Epochs')
-    plt.xlabel('Epochs')
-    plt.ylabel('MAE')
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(args.savedir + 'curve_mae.png', dpi=300)
-    plt.close()
+    # # Plot 2: MAE
+    # plt.figure(figsize=(8, 6))
+    # plt.plot(epochs_range, hist_val_mae, 'g-', label='Validation MAE')
+    # plt.title('Validation MAE over Epochs')
+    # plt.xlabel('Epochs')
+    # plt.ylabel('MAE')
+    # plt.legend()
+    # plt.grid(True)
+    # plt.savefig(args.savedir + 'curve_mae.png', dpi=300)
+    # plt.close()
 
-    # Plot 3: Kinerja F-beta, S-measure, E-measure
-    plt.figure(figsize=(8, 6))
-    plt.plot(epochs_range, hist_val_fbeta, 'm-', label='F-beta')
-    plt.plot(epochs_range, hist_val_smeasure, 'c-', label='S-measure')
-    plt.plot(epochs_range, hist_val_emeasure, 'y-', label='E-measure')
-    plt.title('Validation Metrics over Epochs')
-    plt.xlabel('Epochs')
-    plt.ylabel('Score')
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(args.savedir + 'curve_metrics.png', dpi=300)
-    plt.close()
+    # # Plot 3: Kinerja F-beta, S-measure, E-measure
+    # plt.figure(figsize=(8, 6))
+    # plt.plot(epochs_range, hist_val_fbeta, 'm-', label='F-beta')
+    # plt.plot(epochs_range, hist_val_smeasure, 'c-', label='S-measure')
+    # plt.plot(epochs_range, hist_val_emeasure, 'y-', label='E-measure')
+    # plt.title('Validation Metrics over Epochs')
+    # plt.xlabel('Epochs')
+    # plt.ylabel('Score')
+    # plt.legend()
+    # plt.grid(True)
+    # plt.savefig(args.savedir + 'curve_metrics.png', dpi=300)
+    # plt.close()
     
-    logger.close()
+    # logger.close()
 
 
 if __name__ == '__main__':
