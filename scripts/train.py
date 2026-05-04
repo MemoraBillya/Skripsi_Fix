@@ -418,20 +418,20 @@ def train_validate_saliency(args):
         torch.cuda.empty_cache()
 
        # 3. Evaluasi Validasi
-        print(f"\nStart to evaluate on epoch {epoch+1}")
-        start_time = time.time()
+        # print(f"\nStart to evaluate on epoch {epoch+1}")
+        # start_time = time.time()
         
-        loss_val, F_max_val, F_w_val, S_m_val, E_max_val, E_mean_val, MAE_val = val(args, valLoader, model, criteria)
+        # loss_val, F_max_val, F_w_val, S_m_val, E_max_val, E_mean_val, MAE_val = val(args, valLoader, model, criteria)
         
-        hist_val_loss.append(loss_val)
-        hist_val_fmax.append(F_max_val)
-        hist_val_fw.append(F_w_val)
-        hist_val_smeasure.append(S_m_val)
-        hist_val_emax.append(E_max_val)
-        hist_val_emean.append(E_mean_val)
-        hist_val_mae.append(MAE_val)
+        # hist_val_loss.append(loss_val)
+        # hist_val_fmax.append(F_max_val)
+        # hist_val_fw.append(F_w_val)
+        # hist_val_smeasure.append(S_m_val)
+        # hist_val_emax.append(E_max_val)
+        # hist_val_emean.append(E_mean_val)
+        # hist_val_mae.append(MAE_val)
         
-        print(f"Elapsed evaluation time: {(time.time()-start_time)/3600.0:.4f} hours")
+        # print(f"Elapsed evaluation time: {(time.time()-start_time)/3600.0:.4f} hours")
         torch.cuda.empty_cache()
 
         # 4. Simpan Checkpoint
@@ -444,9 +444,12 @@ def train_validate_saliency(args):
             'f_max_val': F_max_val,
         }, args.savedir + 'checkpoint.pth.tar')
         
-        if epoch > args.max_epochs * 0.5:
-            model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
-            torch.save(model.state_dict(), model_file_name)
+        # if epoch > args.max_epochs * 0.5:
+        #     model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
+        #     torch.save(model.state_dict(), model_file_name)
+        
+        model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
+        torch.save(model.state_dict(), model_file_name)
 
         # 5. Penulisan Log yang Bersih 
         log_str = f"Epoch {epoch+1:03d}\tTr_Loss: {loss_train_main:.4f}\tVal_Loss: {loss_val:.4f}\tF_max: {F_max_val:.4f}\tF_w: {F_w_val:.4f}\tS_m: {S_m_val:.4f}\tE_max: {E_max_val:.4f}\tE_mean: {E_mean_val:.4f}\tMAE: {MAE_val:.4f}"
