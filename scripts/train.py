@@ -432,6 +432,38 @@ def train_validate_saliency(args):
         # hist_val_mae.append(MAE_val)
         
         # print(f"Elapsed evaluation time: {(time.time()-start_time)/3600.0:.4f} hours")
+        # torch.cuda.empty_cache()
+
+        # # 4. Simpan Checkpoint
+        # torch.save({
+        #     'epoch': epoch + 1,
+        #     'arch': str(model),
+        #     'state_dict': model.state_dict(),
+        #     'optimizer': optimizer.state_dict(),
+        #     'loss_val': loss_val,
+        #     'f_max_val': F_max_val,
+        # }, args.savedir + 'checkpoint.pth.tar')
+        
+        # # if epoch > args.max_epochs * 0.5:
+        # #     model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
+        # #     torch.save(model.state_dict(), model_file_name)
+        
+        # model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
+        # torch.save(model.state_dict(), model_file_name)
+
+        # # 5. Penulisan Log yang Bersih 
+        # log_str = f"Epoch {epoch+1:03d}\tTr_Loss: {loss_train_main:.4f}\tVal_Loss: {loss_val:.4f}\tF_max: {F_max_val:.4f}\tF_w: {F_w_val:.4f}\tS_m: {S_m_val:.4f}\tE_max: {E_max_val:.4f}\tE_mean: {E_mean_val:.4f}\tMAE: {MAE_val:.4f}"
+        # logger.write(log_str + "\n")
+        # logger.flush()
+        
+        # print(f"Epoch {epoch+1} Results -> Val Loss: {loss_val:.4f} | F_max: {F_max_val:.4f} | F_w: {F_w_val:.4f} | S-m: {S_m_val:.4f} | E-max: {E_max_val:.4f} | E-mean: {E_mean_val:.4f} | MAE: {MAE_val:.4f}\n")
+        # gc.collect()
+        # torch.cuda.empty_cache()
+
+    # 3. Evaluasi Validasi (DIMATIKAN SEMENTARA UNTUK OFFLINE VALIDATION)
+        # Kita definisikan variabel dummy angka 0 agar fungsi save dan log di bawahnya tidak error
+        loss_val = F_max_val = F_w_val = S_m_val = E_max_val = E_mean_val = MAE_val = 0.0
+
         torch.cuda.empty_cache()
 
         # 4. Simpan Checkpoint
@@ -444,19 +476,16 @@ def train_validate_saliency(args):
             'f_max_val': F_max_val,
         }, args.savedir + 'checkpoint.pth.tar')
         
-        # if epoch > args.max_epochs * 0.5:
-        #     model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
-        #     torch.save(model.state_dict(), model_file_name)
-        
         model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
         torch.save(model.state_dict(), model_file_name)
 
         # 5. Penulisan Log yang Bersih 
-        log_str = f"Epoch {epoch+1:03d}\tTr_Loss: {loss_train_main:.4f}\tVal_Loss: {loss_val:.4f}\tF_max: {F_max_val:.4f}\tF_w: {F_w_val:.4f}\tS_m: {S_m_val:.4f}\tE_max: {E_max_val:.4f}\tE_mean: {E_mean_val:.4f}\tMAE: {MAE_val:.4f}"
+        log_str = f"Epoch {epoch+1:03d}\tTr_Loss: {loss_train_main:.4f}\t(Validasi Offline)"
         logger.write(log_str + "\n")
         logger.flush()
         
-        print(f"Epoch {epoch+1} Results -> Val Loss: {loss_val:.4f} | F_max: {F_max_val:.4f} | F_w: {F_w_val:.4f} | S-m: {S_m_val:.4f} | E-max: {E_max_val:.4f} | E-mean: {E_mean_val:.4f} | MAE: {MAE_val:.4f}\n")
+        print(f"Epoch {epoch+1} Results -> Train Loss: {loss_train_main:.4f} | Model Saved!\n")
+        
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -465,11 +494,10 @@ def train_validate_saliency(args):
     # =========================================================================
     epochs_range = range(1, len(hist_train_loss) + 1)
     
-    # Plot 1: Loss
+    # Plot 1: Loss (Hanya Train Loss karena Validasi offline)
     plt.figure(figsize=(8, 6))
     plt.plot(epochs_range, hist_train_loss, 'b-', label='Train Loss (Main Scale)')
-    plt.plot(epochs_range, hist_val_loss, 'r-', label='Val Loss')
-    plt.title('Training and Validation Loss')
+    plt.title('Training Loss')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
@@ -477,33 +505,33 @@ def train_validate_saliency(args):
     plt.savefig(args.savedir + 'curve_loss.png', dpi=300)
     plt.close()
 
-    # Plot 2: MAE
-    plt.figure(figsize=(8, 6))
-    plt.plot(epochs_range, hist_val_mae, 'g-', label='Validation MAE')
-    plt.title('Validation MAE over Epochs')
-    plt.xlabel('Epochs')
-    plt.ylabel('MAE')
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(args.savedir + 'curve_mae.png', dpi=300)
-    plt.close()
+    # # Plot 2: MAE
+    # plt.figure(figsize=(8, 6))
+    # plt.plot(epochs_range, hist_val_mae, 'g-', label='Validation MAE')
+    # plt.title('Validation MAE over Epochs')
+    # plt.xlabel('Epochs')
+    # plt.ylabel('MAE')
+    # plt.legend()
+    # plt.grid(True)
+    # plt.savefig(args.savedir + 'curve_mae.png', dpi=300)
+    # plt.close()
 
-    # Plot 3: Kinerja F-measure, S-measure, E-measure
-    plt.figure(figsize=(10, 6))
-    plt.plot(epochs_range, hist_val_fmax, 'm-', label='F-measure Max')
-    plt.plot(epochs_range, hist_val_fw, 'm--', label='F-measure Weighted')
-    plt.plot(epochs_range, hist_val_smeasure, 'c-', label='S-measure')
-    plt.plot(epochs_range, hist_val_emax, 'y-', label='E-measure Max')
-    plt.plot(epochs_range, hist_val_emean, 'y--', label='E-measure Mean')
-    plt.title('Validation Metrics over Epochs')
-    plt.xlabel('Epochs')
-    plt.ylabel('Score')
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(args.savedir + 'curve_metrics.png', dpi=300)
-    plt.close()
+    # # Plot 3: Kinerja F-measure, S-measure, E-measure
+    # plt.figure(figsize=(10, 6))
+    # plt.plot(epochs_range, hist_val_fmax, 'm-', label='F-measure Max')
+    # plt.plot(epochs_range, hist_val_fw, 'm--', label='F-measure Weighted')
+    # plt.plot(epochs_range, hist_val_smeasure, 'c-', label='S-measure')
+    # plt.plot(epochs_range, hist_val_emax, 'y-', label='E-measure Max')
+    # plt.plot(epochs_range, hist_val_emean, 'y--', label='E-measure Mean')
+    # plt.title('Validation Metrics over Epochs')
+    # plt.xlabel('Epochs')
+    # plt.ylabel('Score')
+    # plt.legend()
+    # plt.grid(True)
+    # plt.savefig(args.savedir + 'curve_metrics.png', dpi=300)
+    # plt.close()
     
-    logger.close()
+    # logger.close()
 
 
 if __name__ == '__main__':
