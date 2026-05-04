@@ -323,7 +323,7 @@ def train_validate_saliency(args):
 
     valLoader = torch.utils.data.DataLoader(
         Dataset(args.data_dir, val_names[0], transform=valDataset, process_label=True, ignore_index=args.igi),
-        batch_size=2, shuffle=False, num_workers=0, pin_memory=True)
+        batch_size=32, shuffle=False, num_workers=args.num_workers, pin_memory=True)
 
     if args.ms:
         max_batches = len(trainLoader_main) + len(trainLoader_scale1) + len(trainLoader_scale2)
