@@ -16,6 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 import py_sod_metrics as M
+import gc
 
 
 def BCEDiceLoss(inputs, targets, ignore_index=False):
@@ -322,7 +323,7 @@ def train_validate_saliency(args):
 
     valLoader = torch.utils.data.DataLoader(
         Dataset(args.data_dir, val_names[0], transform=valDataset, process_label=True, ignore_index=args.igi),
-        batch_size=12, shuffle=False, num_workers=args.num_workers, pin_memory=True)
+        batch_size=2, shuffle=False, num_workers=0, pin_memory=True)
 
     if args.ms:
         max_batches = len(trainLoader_main) + len(trainLoader_scale1) + len(trainLoader_scale2)
@@ -451,7 +452,8 @@ def train_validate_saliency(args):
         logger.flush()
         
         print(f"Epoch {epoch+1} Results -> Val Loss: {loss_val:.4f} | F_max: {F_max_val:.4f} | F_w: {F_w_val:.4f} | S-m: {S_m_val:.4f} | E-max: {E_max_val:.4f} | E-mean: {E_mean_val:.4f} | MAE: {MAE_val:.4f}\n")
-
+        gc.collect()
+        torch.cuda.empty_cache()
 
     # =========================================================================
     # GENERATE PLOTS SELESAI TRAINING
