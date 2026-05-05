@@ -133,7 +133,7 @@ def main():
     data_dir = '/kaggle/working/data/'
     
     # Folder tempat model 1-30 Anda berada (Bisa dibaca)
-    model_dir = '/kaggle/input/datasets/billydawson/allepochs-bs32-lr1-7e-4/' 
+    model_dir = '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs32lr1-7e-4' 
     
     # Folder tempat menyimpan hasil evaluasi (Harus di /working/ agar bisa ditulis)
     output_dir = '/kaggle/working/' 
@@ -165,7 +165,7 @@ def main():
     # 1. Loader Validasi (process_label=True untuk hitung Loss Granular)
     valLoader = torch.utils.data.DataLoader(
         Dataset(data_dir, 'DUTS-TR-VAL', transform=valDataset, process_label=True),
-        batch_size=4, shuffle=False, num_workers=0, pin_memory=True) # BATCH KECIL & WORKER 0 (SUPER AMAN)
+        batch_size=32, shuffle=False, num_workers=2, pin_memory=True) # BATCH KECIL & WORKER 0 (SUPER AMAN)
 
     # 2. Loader Benchmark Test (process_label=False karena tidak hitung Loss)
     test_names = ["DUTS-TE", "DUT-OMRON", "HKU-IS", "ECSSD", "PASCAL-S"]
@@ -173,7 +173,7 @@ def main():
     for t_name in test_names:
         testLoaders[t_name] = torch.utils.data.DataLoader(
             Dataset(data_dir, t_name, transform=valDataset, process_label=False),
-            batch_size=4, shuffle=False, num_workers=0, pin_memory=True)
+            batch_size=32, shuffle=False, num_workers=2, pin_memory=True)
 
     # Buka file log untuk mencatat hasil eval
     log_eval = open(os.path.join(output_dir, 'evaluation_results.txt'), 'w')
