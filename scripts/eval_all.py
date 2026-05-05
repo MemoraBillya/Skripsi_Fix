@@ -197,7 +197,9 @@ def main():
         # --- 1. Evaluasi Validation Set ---
         print(">> Dataset Validasi (DUTS-TR Val 20%) -> Menghitung Loss & Metrik...")
         val_res = evaluate_dataset(model, valLoader, criteria, calc_loss=True, device=device)
-        val_log = f"Epoch {epoch} [VAL] -> Loss: {val_res['loss']:.4f} | F-max: {val_res['F_max']:.4f} | MAE: {val_res['MAE']:.4f}"
+        
+        # PERBAIKAN: Cetak SEMUA metrik untuk Validation
+        val_log = f"Epoch {epoch} [VAL] -> Loss: {val_res['loss']:.4f} | F-max: {val_res['F_max']:.4f} | F-w: {val_res['F_w']:.4f} | S-m: {val_res['S_m']:.4f} | E-max: {val_res['E_max']:.4f} | E-mean: {val_res['E_mean']:.4f} | MAE: {val_res['MAE']:.4f}"
         print(val_log)
         log_eval.write(val_log + "\n")
         
@@ -205,7 +207,9 @@ def main():
         for t_name in test_names:
             print(f">> Benchmark: {t_name} -> Menghitung Metrik...")
             t_res = evaluate_dataset(model, testLoaders[t_name], criterion=None, calc_loss=False, device=device)
-            t_log = f"          [{t_name}] -> F-max: {t_res['F_max']:.4f} | F-w: {t_res['F_w']:.4f} | S-m: {t_res['S_m']:.4f} | MAE: {t_res['MAE']:.4f}"
+            
+            # PERBAIKAN: Cetak SEMUA metrik untuk Test Sets (tanpa Loss)
+            t_log = f"          [{t_name}] -> F-max: {t_res['F_max']:.4f} | F-w: {t_res['F_w']:.4f} | S-m: {t_res['S_m']:.4f} | E-max: {t_res['E_max']:.4f} | E-mean: {t_res['E_mean']:.4f} | MAE: {t_res['MAE']:.4f}"
             print(t_log)
             log_eval.write(t_log + "\n")
             
