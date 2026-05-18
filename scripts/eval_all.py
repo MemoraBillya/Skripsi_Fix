@@ -133,7 +133,7 @@ def main():
     data_dir = '/kaggle/working/data/'
     
     # Folder tempat model 1-30 Anda berada (Bisa dibaca)
-    model_dir = '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs32lr1-7e-5' 
+    model_dir = '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs8lr1-7e-3' 
     
     # Folder tempat menyimpan hasil evaluasi (Harus di /working/ agar bisa ditulis)
     output_dir = '/kaggle/working/' 
