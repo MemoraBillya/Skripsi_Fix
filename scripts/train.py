@@ -91,53 +91,82 @@ class CEOLoss(nn.Module):
         return sum(loss_overall)/len(loss_overall)*3
 
 
+# @torch.no_grad()
+# def val(args, val_loader, model, criterion):
+#     model.eval()
+#     sal_eval_val = SalEval()
+#     SM = M.Smeasure()
+#     EM = M.Emeasure()
+    
+#     epoch_loss = []
+#     bar = tqdm(val_loader, desc="Validating")
+
+#     for iter, (input, target) in enumerate(bar):
+#         input_var = input.to(device)
+#         target_var = target.to(device).float()
+
+#         output = model(input_var)
+        
+#         # FIX: Squeeze target_var agar dimensinya 3D [Batch, H, W]
+#         target_squeezed = target_var.squeeze(1) 
+
+#         # Hitung Val Loss dengan membuang dimensi channel yang tidak diperlukan
+#         loss = criterion.criterion(output[:, 0, :, :], target_squeezed) / args.iter_size
+#         epoch_loss.append(loss.item())
+
+#         # F-beta & MAE
+#         sal_eval_val.add_batch(output[:, 0, :, :], target_var)
+        
+#         # S-Measure & E-Measure
+#         preds = (output[:, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
+#         gts = target_squeezed.cpu().numpy().astype(np.uint8)
+        
+#         if len(preds.shape) == 2:
+#             preds = np.expand_dims(preds, axis=0)
+#             gts = np.expand_dims(gts, axis=0)
+            
+#         for i in range(preds.shape[0]):
+#             SM.step(preds[i], gts[i])
+#             EM.step(preds[i], gts[i])
+
+#         if iter % 10 == 0:
+#             bar.set_description(f"Val Loss: {sum(epoch_loss) / len(epoch_loss):.5f}")
+
+#     average_epoch_loss_val = sum(epoch_loss) / len(epoch_loss)
+#     F_beta, MAE = sal_eval_val.get_metric()
+#     S_measure = SM.get_results()['sm']
+#     E_measure = EM.get_results()['em']['curve'].max()
+
+#     return average_epoch_loss_val, F_beta, MAE, S_measure, E_measure
+
 @torch.no_grad()
 def val(args, val_loader, model, criterion):
+    # switch to evaluation mode
     model.eval()
-    sal_eval_val = SalEval()
-    SM = M.Smeasure()
-    EM = M.Emeasure()
-    
     epoch_loss = []
-    bar = tqdm(val_loader, desc="Validating")
+    
+    # tqdm bar untuk memantau progress validasi ringan
+    bar = tqdm(val_loader, desc="Validating (Loss Only)")
 
     for iter, (input, target) in enumerate(bar):
         input_var = input.to(device)
-        target_var = target.to(device).float()
+        # Squeeze target agar dimensinya 3D [Batch, H, W]
+        target_squeezed = target.to(device).float().squeeze(1)
 
         output = model(input_var)
         
-        # FIX: Squeeze target_var agar dimensinya 3D [Batch, H, W]
-        target_squeezed = target_var.squeeze(1) 
-
-        # Hitung Val Loss dengan membuang dimensi channel yang tidak diperlukan
+        # Hitung Val Loss HANYA pada mask level 0 (non-granular)
+        # criterion.criterion mengakses BCEDiceLoss bawaan, bukan CEOLoss multi-scale
         loss = criterion.criterion(output[:, 0, :, :], target_squeezed) / args.iter_size
         epoch_loss.append(loss.item())
-
-        # F-beta & MAE
-        sal_eval_val.add_batch(output[:, 0, :, :], target_var)
-        
-        # S-Measure & E-Measure
-        preds = (output[:, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
-        gts = target_squeezed.cpu().numpy().astype(np.uint8)
-        
-        if len(preds.shape) == 2:
-            preds = np.expand_dims(preds, axis=0)
-            gts = np.expand_dims(gts, axis=0)
-            
-        for i in range(preds.shape[0]):
-            SM.step(preds[i], gts[i])
-            EM.step(preds[i], gts[i])
 
         if iter % 10 == 0:
             bar.set_description(f"Val Loss: {sum(epoch_loss) / len(epoch_loss):.5f}")
 
     average_epoch_loss_val = sum(epoch_loss) / len(epoch_loss)
-    F_beta, MAE = sal_eval_val.get_metric()
-    S_measure = SM.get_results()['sm']
-    E_measure = EM.get_results()['em']['curve'].max()
 
-    return average_epoch_loss_val, F_beta, MAE, S_measure, E_measure
+    # Kembalikan loss saja, sisa metrik diisi 0.0 agar format output tetap aman
+    return average_epoch_loss_val, 0.0, 0.0, 0.0, 0.0
 
 
 def train(args, train_loader, model, criterion, optimizer, epoch, max_batches, cur_iter=0):
@@ -366,9 +395,35 @@ def train_validate_saliency(args):
         # print(f"Elapsed evaluation time: {(time.time()-start_time)/3600.0:.4f} hours")
         # torch.cuda.empty_cache()
 
-        # 3. Evaluasi Validasi (DIMATIKAN UNTUK TRAINING ONLY)
-        # Buat variabel dummy 0.0 agar fungsi save dan log di bawahnya tidak crash
-        loss_val = F_beta_val = MAE_val = S_m_val = E_m_val = 0.0
+        # # 3. Evaluasi Validasi (DIMATIKAN UNTUK TRAINING ONLY)
+        # # Buat variabel dummy 0.0 agar fungsi save dan log di bawahnya tidak crash
+        # loss_val = F_beta_val = MAE_val = S_m_val = E_m_val = 0.0
+
+        # # 4. Simpan Checkpoint
+        # torch.save({
+        #     'epoch': epoch + 1,
+        #     'arch': str(model),
+        #     'state_dict': model.state_dict(),
+        #     'optimizer': optimizer.state_dict(),
+        #     'loss_val': loss_val,
+        #     'iou_val': F_beta_val,
+        # }, args.savedir + 'checkpoint.pth.tar')
+
+        # # SYARAT 0.5 DIHAPUS: Simpan model dari epoch 1 sampai 30
+        # model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
+        # torch.save(model.state_dict(), model_file_name)
+
+        # # 5. Penulisan Log yang Bersih (Menampilkan Train Loss saja agar rapi)
+        # log_str = f"Epoch {epoch+1:03d}\tTr_Loss(s1,s2,main): {loss_train_s1:.4f}, {loss_train_s2:.4f}, {loss_train_main:.4f}\t(Validasi Offline)"
+        # logger.write(log_str + "\n")
+        # logger.flush()
+        
+        # print(f"Epoch {epoch+1} Results -> Train Loss: {loss_train_main:.4f} | Model Tersimpan!\n")
+
+        # 3. Evaluasi Validasi (Ringan: Hanya Val Loss Level 0)
+        print(f"\nStart to evaluate on epoch {epoch+1}")
+        loss_val, F_beta_val, MAE_val, S_m_val, E_m_val = val(args, valLoader, model, criteria)
+        torch.cuda.empty_cache()
 
         # 4. Simpan Checkpoint
         torch.save({
@@ -377,19 +432,18 @@ def train_validate_saliency(args):
             'state_dict': model.state_dict(),
             'optimizer': optimizer.state_dict(),
             'loss_val': loss_val,
-            'iou_val': F_beta_val,
+            'iou_val': F_beta_val, # Ini akan tersimpan 0.0, tidak masalah
         }, args.savedir + 'checkpoint.pth.tar')
 
-        # SYARAT 0.5 DIHAPUS: Simpan model dari epoch 1 sampai 30
         model_file_name = args.savedir + 'model_' + str(epoch + 1) + '.pth'
         torch.save(model.state_dict(), model_file_name)
 
-        # 5. Penulisan Log yang Bersih (Menampilkan Train Loss saja agar rapi)
-        log_str = f"Epoch {epoch+1:03d}\tTr_Loss(s1,s2,main): {loss_train_s1:.4f}, {loss_train_s2:.4f}, {loss_train_main:.4f}\t(Validasi Offline)"
+        # 5. Penulisan Log yang Bersih
+        log_str = f"Epoch {epoch+1:03d}\tTr_Loss(s1,s2,main): {loss_train_s1:.4f}, {loss_train_s2:.4f}, {loss_train_main:.4f}\tVal_Loss: {loss_val:.4f}\t(Metrik Offline)"
         logger.write(log_str + "\n")
         logger.flush()
         
-        print(f"Epoch {epoch+1} Results -> Train Loss: {loss_train_main:.4f} | Model Tersimpan!\n")
+        print(f"Epoch {epoch+1} Results -> Train Loss: {loss_train_main:.4f} | Val Loss: {loss_val:.4f} | Model Tersimpan!\n")
 
 
     # =========================================================================
