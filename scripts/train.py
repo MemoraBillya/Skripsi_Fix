@@ -290,8 +290,12 @@ def train_validate_saliency(args):
         batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=True)
 
     valLoader = torch.utils.data.DataLoader(
-        Dataset(args.data_dir, val_names[0], transform=valDataset, process_label=False),
+        Dataset(args.data_dir, 'DUTS-TR-VAL', transform=valDataset, process_label=False), # <--- UBAH DI SINI
         batch_size=12, shuffle=False, num_workers=args.num_workers, pin_memory=True)
+
+    # valLoader = torch.utils.data.DataLoader(
+    #     Dataset(args.data_dir, val_names[0], transform=valDataset, process_label=False),
+    #     batch_size=12, shuffle=False, num_workers=args.num_workers, pin_memory=True)
 
     if args.ms:
         max_batches = len(trainLoader_main) + len(trainLoader_scale1) + len(trainLoader_scale2)
