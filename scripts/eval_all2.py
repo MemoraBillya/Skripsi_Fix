@@ -75,7 +75,7 @@ def main():
     data_dir = '/kaggle/working/data/'
     
     # Folder tempat model 1-30 Anda berada
-    model_dir = '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs16lr1-7e-4' 
+    model_dir = '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs8lr1-7e-4' 
     output_dir = '/kaggle/working/' 
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
