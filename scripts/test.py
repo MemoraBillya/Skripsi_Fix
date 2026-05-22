@@ -21,7 +21,7 @@ def test(args, model, image_list, label_list, save_dir):
     mean = [0.406, 0.456, 0.485]
     std = [0.225, 0.224, 0.229]
 
-    # Inisialisasi Metrik Global
+    # Inisialisasi Metrik Global (Untuk hasil akhir seluruh dataset)
     SM = M.Smeasure()
     EM = M.Emeasure()
     WFM = M.WeightedFmeasure()
@@ -65,27 +65,43 @@ def test(args, model, image_list, label_list, save_dir):
         FM.step(pred=pred_map, gt=gt_map)
         MAE.step(pred=pred_map, gt=gt_map)
 
-        # 3. Hitung Metrik Per Gambar (Khusus S-measure & MAE)
+        # 3. Hitung Metrik Per Gambar (KOMPLIT 6 METRIK)
         img_SM = M.Smeasure()
+        img_EM = M.Emeasure()
+        img_WFM = M.WeightedFmeasure()
+        img_FM = M.Fmeasure()
         img_MAE = M.MAE()
+
         img_SM.step(pred=pred_map, gt=gt_map)
+        img_EM.step(pred=pred_map, gt=gt_map)
+        img_WFM.step(pred=pred_map, gt=gt_map)
+        img_FM.step(pred=pred_map, gt=gt_map)
         img_MAE.step(pred=pred_map, gt=gt_map)
         
+        # Ekstrak kurva dari F-measure dan E-measure untuk gambar ini
+        img_fm_curve = img_FM.get_results()['fm']['curve']
+        img_em_curve = img_EM.get_results()['em']['curve']
+
         per_image_scores.append({
             'filename': image_name,
             'S_measure': round(img_SM.get_results()['sm'], 4),
+            'max_F_measure': round(img_fm_curve.max(), 4),
+            'w_F_measure': round(img_WFM.get_results()['wfm'], 4),
+            'max_E_measure': round(img_em_curve.max(), 4),
+            'mean_E_measure': round(img_em_curve.mean(), 4),
             'MAE': round(img_MAE.get_results()['mae'], 4)
         })
 
     # Simpan Skor Per Gambar ke CSV
     csv_path = osp.join(save_dir, 'per_image_scores.csv')
     with open(csv_path, mode='w', newline='') as csv_file:
-        fieldnames = ['filename', 'S_measure', 'MAE']
+        # Fieldnames disamakan persis dengan keys di dictionary
+        fieldnames = ['filename', 'S_measure', 'max_F_measure', 'w_F_measure', 'max_E_measure', 'mean_E_measure', 'MAE']
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(per_image_scores)
 
-    # Ekstrak Skor Global Akhir
+    # Ekstrak Skor Global Akhir (Untuk Terminal)
     sm = SM.get_results()['sm']
     em_max = EM.get_results()['em']['curve'].max()
     em_mean = EM.get_results()['em']['curve'].mean()
