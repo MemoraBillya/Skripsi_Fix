@@ -68,15 +68,22 @@ def evaluate_loss_only(model, dataloader, criterion, device='cuda'):
     return sum(epoch_loss) / len(epoch_loss)
 
 # =========================================================================
-# EKSEKUSI UTAMA
+# EKSEKUSI UTAMA (BATCH LOOP)
 # =========================================================================
 def main():
     # --- KONFIGURASI PATH ---
     data_dir = '/kaggle/working/data/'
-    
-    # Folder tempat model 1-30 Anda berada
-    model_dir = '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs8lr1-7e-4' 
     output_dir = '/kaggle/working/' 
+    
+    # DAFTAR SEMUA FOLDER MODEL YANG INGIN DIEVALUASI
+    model_dirs = [
+        '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs8lr1-7e-5',
+        '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs8lr1-7e-3',
+        '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs32lr1-7e-5',
+        '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs32lr1-7e-3',
+        '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs16lr1-7e-5',
+        '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs16lr1-7e-3'
+    ]
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = net.GAPNet(arch='iformer_tiny', pretrained=False).to(device)
@@ -84,7 +91,6 @@ def main():
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
 
-    # Gunakan fungsi dasar BCEDiceLoss secara langsung (tanpa CEOLoss)
     criterion = BCEDiceLoss
     
     NORMALISE_PARAMS = [np.array([0.406, 0.456, 0.485], dtype=np.float32).reshape((1, 1, 3)), 
@@ -99,34 +105,52 @@ def main():
     if os.path.exists(partisi_val_path):
         shutil.copy(partisi_val_path, os.path.join(data_dir, 'DUTS-TR-VAL.lst'))
     
-    # --- INISIALISASI DATALOADER ---
-    # process_label=False membuat CPU tidak perlu menghitung 6 lapis mask!
+    # --- INISIALISASI DATALOADER (Hanya dilakukan 1x untuk semua antrean) ---
     valLoader = torch.utils.data.DataLoader(
         Dataset(data_dir, 'DUTS-TR-VAL', transform=valDataset, process_label=False),
         batch_size=32, shuffle=False, num_workers=2, pin_memory=True)
 
-    log_eval = open(os.path.join(output_dir, 'val_loss_only_results.txt'), 'w')
-
-    print("Memulai Evaluasi Cepat (Hanya Val Loss Level 0)...\n")
+    print("🚀 Memulai Evaluasi Cepat Antrean Model (Val Loss Only)...\n")
     
-    for epoch in range(1, 31):
-        model_path = os.path.join(model_dir, f'model_{epoch}.pth')
+    # --- OUTER LOOP: ITERASI SETIAP FOLDER MODEL ---
+    for m_dir in model_dirs:
+        # Ambil nama folder untuk penamaan file log (misal: 'mdl-img-bs8lr1-7e-5')
+        config_name = os.path.basename(m_dir.rstrip('/'))
         
-        if not os.path.exists(model_path):
+        if not os.path.exists(m_dir):
+            print(f"⚠️ Folder {config_name} tidak ditemukan. Melewati antrean ini...")
             continue
             
-        model.load_state_dict(torch.load(model_path, map_location=device))
+        print("="*60)
+        print(f"🔎 Mengevaluasi Konfigurasi: {config_name}")
+        print("="*60)
         
-        # Eksekusi kalkulasi loss
-        val_loss = evaluate_loss_only(model, valLoader, criterion, device=device)
+        # Buat file log spesifik untuk konfigurasi ini
+        log_path = os.path.join(output_dir, f'val_loss_{config_name}.txt')
+        log_eval = open(log_path, 'w')
         
-        # Cetak dan catat hasilnya
-        val_log = f"Epoch {epoch:02d} | Val Loss (Mask Akhir): {val_loss:.4f}"
-        print(val_log)
-        log_eval.write(val_log + "\n")
+        # --- INNER LOOP: ITERASI EPOCH 1-30 ---
+        for epoch in range(1, 31):
+            model_path = os.path.join(m_dir, f'model_{epoch}.pth')
             
-    log_eval.close()
-    print("\n✅ Evaluasi cepat selesai! Hasil tersimpan di val_loss_only_results.txt")
+            if not os.path.exists(model_path):
+                continue # Jika model_15.pth tidak ada, lanjut ke 16
+                
+            # Load bobot model
+            model.load_state_dict(torch.load(model_path, map_location=device))
+            
+            # Hitung Loss
+            val_loss = evaluate_loss_only(model, valLoader, criterion, device=device)
+            
+            # Catat hasil
+            val_log = f"Epoch {epoch:02d} | Val Loss (Mask Akhir): {val_loss:.4f}"
+            print(val_log)
+            log_eval.write(val_log + "\n")
+                
+        log_eval.close()
+        print(f"✅ Selesai! Log tersimpan di: val_loss_{config_name}.txt\n")
+
+    print("🎉 SEMUA ANTREAN EVALUASI SELESAI!")
 
 if __name__ == '__main__':
     main()
