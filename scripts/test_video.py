@@ -3,11 +3,6 @@ import torch
 import cv2
 import time
 import os
-import shutil
-import torch
-import cv2
-import time
-import os
 import csv
 import os.path as osp
 import numpy as np
@@ -29,16 +24,28 @@ def test_and_evaluate(args, model, video_dict, save_dir):
     SM_global = M.Smeasure()
     MAE_global = M.MAE()
 
-    csv_data = []
+    # Dictionary untuk menyimpan metrik level video per dataset
+    dataset_video_metrics = defaultdict(list)
 
     print("\n🚀 Memulai Proses Testing & Evaluasi...")
     for video_key, frames in tqdm(video_dict.items(), desc="Memproses Video"):
         dataset_name, video_name = video_key
         
+        # Setup direktori penyimpanan untuk gambar dan metrik
+        vid_save_dir = osp.join(save_dir, dataset_name, video_name)
+        os.makedirs(vid_save_dir, exist_ok=True)
+        
+        metrics_dir = osp.join(save_dir, "Metrics", dataset_name)
+        per_frame_dir = osp.join(metrics_dir, "Per_Frame")
+        os.makedirs(per_frame_dir, exist_ok=True)
+        
         # Inisialisasi Metrik Per-Video
         FM_vid = M.Fmeasure()
         SM_vid = M.Smeasure()
         MAE_vid = M.MAE()
+        
+        # List untuk menyimpan data per frame khusus video ini
+        frame_metrics_data = []
         
         for img_path, flow_path, label_path in frames:
             image = cv2.imread(img_path)
@@ -54,14 +61,12 @@ def test_and_evaluate(args, model, video_dict, save_dir):
             img = img.astype(np.float32) / 255.
             img -= mean
             img /= std
-            # Gunakan .copy() untuk menghindari error Negative Stride
             img = img[:, :, ::-1].copy().transpose((2, 0, 1))
             img_var = torch.from_numpy(img).unsqueeze(0).to(device)
             
             flow_img = flow_img.astype(np.float32) / 255.
             flow_img -= mean
             flow_img /= std
-            # Gunakan .copy() untuk menghindari error Negative Stride
             flow_img = flow_img[:, :, ::-1].copy().transpose((2, 0, 1))
             flow_var = torch.from_numpy(flow_img).unsqueeze(0).to(device)
             
@@ -74,13 +79,10 @@ def test_and_evaluate(args, model, video_dict, save_dir):
             pred_np = (pred_map.squeeze().cpu().numpy() * 255).astype(np.uint8)
             
             frame_name = osp.basename(img_path).replace('.jpg', '.png')
-            vid_save_dir = osp.join(save_dir, dataset_name, video_name)
-            os.makedirs(vid_save_dir, exist_ok=True)
-            
             save_path = osp.join(vid_save_dir, frame_name)
             cv2.imwrite(save_path, pred_np)
             
-            # Hitung Metrik
+            # 1. Update Metrik Video & Global
             FM_vid.step(pred=pred_np, gt=gt)
             SM_vid.step(pred=pred_np, gt=gt)
             MAE_vid.step(pred=pred_np, gt=gt)
@@ -89,25 +91,60 @@ def test_and_evaluate(args, model, video_dict, save_dir):
             SM_global.step(pred=pred_np, gt=gt)
             MAE_global.step(pred=pred_np, gt=gt)
             
-        # Catat Metrik Video
+            # 2. Hitung Metrik KHUSUS untuk Frame ini saja
+            FM_frame = M.Fmeasure()
+            SM_frame = M.Smeasure()
+            MAE_frame = M.MAE()
+            
+            FM_frame.step(pred=pred_np, gt=gt)
+            SM_frame.step(pred=pred_np, gt=gt)
+            MAE_frame.step(pred=pred_np, gt=gt)
+            
+            # Ekstrak nilai metrik dari frame tunggal
+            f_max_f = FM_frame.get_results()['fm']['curve'].max()
+            sm_f = SM_frame.get_results()['sm']
+            mae_f = MAE_frame.get_results()['mae']
+            
+            frame_metrics_data.append([frame_name, sm_f, f_max_f, mae_f])
+            
+        # --- Selesai 1 Video ---
+        
+        # Simpan CSV Per Frame untuk video ini
+        frame_csv_path = osp.join(per_frame_dir, f"{video_name}_frames.csv")
+        with open(frame_csv_path, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(['Frame', 'S_m', 'F_max', 'MAE'])
+            writer.writerows(frame_metrics_data)
+        
+        # Catat Metrik Keseluruhan Video ini ke Dictionary Dataset
         fm_v = FM_vid.get_results()['fm']['curve'].max()
         sm_v = SM_vid.get_results()['sm']
         mae_v = MAE_vid.get_results()['mae']
-        csv_data.append([dataset_name, video_name, sm_v, fm_v, mae_v])
+        dataset_video_metrics[dataset_name].append([video_name, sm_v, fm_v, mae_v])
 
-    # Catat Metrik Global
+    # --- Selesai Semua Video ---
+
+    print("\n💾 Menyimpan File CSV Metrik...")
+    
+    # 1. Simpan CSV Video-Level per Dataset
+    for d_name, v_metrics in dataset_video_metrics.items():
+        dataset_csv_path = osp.join(save_dir, "Metrics", d_name, "video_metrics.csv")
+        with open(dataset_csv_path, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(['Video', 'S_m', 'F_max', 'MAE'])
+            writer.writerows(v_metrics)
+
+    # 2. Simpan CSV Global
     fm_g = FM_global.get_results()['fm']['curve'].max()
     sm_g = SM_global.get_results()['sm']
     mae_g = MAE_global.get_results()['mae']
-    csv_data.append(['ALL_DATASETS', 'GLOBAL_AVERAGE', sm_g, fm_g, mae_g])
-
-    # Simpan CSV ke DALAM save_dir agar ikut ter-ZIP bersama gambar
-    csv_path = osp.join(save_dir, f"{args.method_tag}_metrics.csv")
-    with open(csv_path, mode='w', newline='') as file:
+    
+    global_csv_path = osp.join(save_dir, "Metrics", "global_metrics.csv")
+    with open(global_csv_path, mode='w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(['Dataset', 'Video', 'S_m', 'F_max', 'MAE'])
-        writer.writerows(csv_data)
-        
+        writer.writerow(['Dataset', 'S_m', 'F_max', 'MAE'])
+        writer.writerow(['ALL_DATASETS', sm_g, fm_g, mae_g])
+
     return sm_g, fm_g, mae_g
 
 def main(args):
@@ -123,12 +160,11 @@ def main(args):
                 flow_path = osp.join(args.data_dir, line_arr[1].strip())
                 gt_path = osp.join(args.data_dir, line_arr[2].strip())
                 
-                # Ekstraksi absolut agar terhindar dari path '..' 
                 parts = img_path.replace('\\', '/').split('/')
                 try:
                     imgs_idx = parts.index('Imgs')
                     video_name = parts[imgs_idx - 1]
-                    dataset_name = parts[imgs_idx - 3] # mundur 3: Imgs -> video -> test -> dataset
+                    dataset_name = parts[imgs_idx - 3] 
                 except ValueError:
                     video_name = parts[-2]
                     dataset_name = parts[-4] if len(parts) >= 4 else "Dataset"
@@ -141,7 +177,7 @@ def main(args):
     model = net.GAPNet(arch=args.arch, pretrained=False)
     
     if not osp.isfile(args.pretrained):
-        print(f'❌ File pre-trained tidak ditemukan: {args.pretrained}')
+        print(f'File pre-trained tidak ditemukan: {args.pretrained}')
         exit(-1)
 
     state_dict = torch.load(args.pretrained, map_location='cpu')
@@ -159,15 +195,14 @@ def main(args):
     flops = FlopCountAnalysis(model, (dummy_img, dummy_flow))
     print(f"total flops: {flops.total()/1e9:.4f}G")
 
-    print("⚡ Menguji kecepatan FPS (Batch Size 1)...")
+    print("Menguji kecepatan FPS (Batch Size 1)...")
     bs = 1
     with torch.no_grad():
         for _ in range(50): _ = model(dummy_img, dummy_flow)
-        from time import time
-        start_t = time()
+        start_t = time.time()
         for _ in range(100): _ = model(dummy_img, dummy_flow)
-        total_t = time() - start_t
-    print(f"⏱️  Kecepatan: {100 / total_t * bs:.2f} FPS")
+        total_t = time.time() - start_t
+    print(f"Kecepatan: {100 / total_t * bs:.2f} FPS")
 
     # Testing & Evaluasi
     save_dir = osp.join(args.save_dir, args.method_tag)
@@ -175,11 +210,11 @@ def main(args):
     sm_g, fm_g, mae_g = test_and_evaluate(args, model, video_dict, save_dir)
     print(f'\n🎯 Hasil Akhir Global -> S_m: {sm_g:.4f}, F_max: {fm_g:.4f}, MAE: {mae_g:.4f}')
     
-    # ZIP
+    # ZIP - Folder Metrics akan otomatis ikut ter-zip karena berada di dalam save_dir
     zip_path = osp.join(args.save_dir, args.method_tag)
-    print(f"📦 Mengompresi hasil prediksi dan CSV ke {zip_path}.zip ...")
+    print(f" Mengompresi hasil prediksi dan CSV ke {zip_path}.zip ...")
     shutil.make_archive(zip_path, 'zip', save_dir)
-    print("✅ Kompresi selesai!")
+    print(" Kompresi selesai! File zip ada di", zip_path + ".zip")
 
 if __name__ == '__main__':
     parser = ArgumentParser()
@@ -196,6 +231,205 @@ if __name__ == '__main__':
 
     device = torch.device('cuda') if args.gpu and torch.cuda.is_available() else torch.device('cpu')
     main(args)
+
+# import shutil
+# import torch
+# import cv2
+# import time
+# import os
+# import shutil
+# import torch
+# import cv2
+# import time
+# import os
+# import csv
+# import os.path as osp
+# import numpy as np
+# import torch.nn.functional as F
+# from argparse import ArgumentParser
+# from collections import defaultdict
+# import py_sod_metrics as M
+# from models import model_video as net
+# from tqdm import tqdm
+# from fvcore.nn import FlopCountAnalysis
+
+# @torch.no_grad()
+# def test_and_evaluate(args, model, video_dict, save_dir):
+#     mean = [0.406, 0.456, 0.485]
+#     std = [0.225, 0.224, 0.229]
+    
+#     # Inisialisasi Metrik Global
+#     FM_global = M.Fmeasure()
+#     SM_global = M.Smeasure()
+#     MAE_global = M.MAE()
+
+#     csv_data = []
+
+#     print("\n🚀 Memulai Proses Testing & Evaluasi...")
+#     for video_key, frames in tqdm(video_dict.items(), desc="Memproses Video"):
+#         dataset_name, video_name = video_key
+        
+#         # Inisialisasi Metrik Per-Video
+#         FM_vid = M.Fmeasure()
+#         SM_vid = M.Smeasure()
+#         MAE_vid = M.MAE()
+        
+#         for img_path, flow_path, label_path in frames:
+#             image = cv2.imread(img_path)
+#             flow = cv2.imread(flow_path)
+#             gt = cv2.imread(label_path, cv2.IMREAD_GRAYSCALE)
+            
+#             orig_shape = image.shape[:2]
+            
+#             # Pre-processing
+#             img = cv2.resize(image, (args.width, args.height))
+#             flow_img = cv2.resize(flow, (args.width, args.height))
+            
+#             img = img.astype(np.float32) / 255.
+#             img -= mean
+#             img /= std
+#             # Gunakan .copy() untuk menghindari error Negative Stride
+#             img = img[:, :, ::-1].copy().transpose((2, 0, 1))
+#             img_var = torch.from_numpy(img).unsqueeze(0).to(device)
+            
+#             flow_img = flow_img.astype(np.float32) / 255.
+#             flow_img -= mean
+#             flow_img /= std
+#             # Gunakan .copy() untuk menghindari error Negative Stride
+#             flow_img = flow_img[:, :, ::-1].copy().transpose((2, 0, 1))
+#             flow_var = torch.from_numpy(flow_img).unsqueeze(0).to(device)
+            
+#             # Prediksi
+#             preds = model(img_var, flow_var)
+#             pred_map = preds[:, 0, :, :].unsqueeze(1)
+            
+#             # Post-processing & Simpan Mask
+#             pred_map = F.interpolate(pred_map, size=orig_shape, mode='bilinear', align_corners=False)
+#             pred_np = (pred_map.squeeze().cpu().numpy() * 255).astype(np.uint8)
+            
+#             frame_name = osp.basename(img_path).replace('.jpg', '.png')
+#             vid_save_dir = osp.join(save_dir, dataset_name, video_name)
+#             os.makedirs(vid_save_dir, exist_ok=True)
+            
+#             save_path = osp.join(vid_save_dir, frame_name)
+#             cv2.imwrite(save_path, pred_np)
+            
+#             # Hitung Metrik
+#             FM_vid.step(pred=pred_np, gt=gt)
+#             SM_vid.step(pred=pred_np, gt=gt)
+#             MAE_vid.step(pred=pred_np, gt=gt)
+            
+#             FM_global.step(pred=pred_np, gt=gt)
+#             SM_global.step(pred=pred_np, gt=gt)
+#             MAE_global.step(pred=pred_np, gt=gt)
+            
+#         # Catat Metrik Video
+#         fm_v = FM_vid.get_results()['fm']['curve'].max()
+#         sm_v = SM_vid.get_results()['sm']
+#         mae_v = MAE_vid.get_results()['mae']
+#         csv_data.append([dataset_name, video_name, sm_v, fm_v, mae_v])
+
+#     # Catat Metrik Global
+#     fm_g = FM_global.get_results()['fm']['curve'].max()
+#     sm_g = SM_global.get_results()['sm']
+#     mae_g = MAE_global.get_results()['mae']
+#     csv_data.append(['ALL_DATASETS', 'GLOBAL_AVERAGE', sm_g, fm_g, mae_g])
+
+#     # Simpan CSV ke DALAM save_dir agar ikut ter-ZIP bersama gambar
+#     csv_path = osp.join(save_dir, f"{args.method_tag}_metrics.csv")
+#     with open(csv_path, mode='w', newline='') as file:
+#         writer = csv.writer(file)
+#         writer.writerow(['Dataset', 'Video', 'S_m', 'F_max', 'MAE'])
+#         writer.writerows(csv_data)
+        
+#     return sm_g, fm_g, mae_g
+
+# def main(args):
+#     video_dict = defaultdict(list)
+#     total_frames = 0
+    
+#     lst_file = osp.join(args.data_dir, args.dataset_name + '.lst')
+#     with open(lst_file) as fid:
+#         for line in fid:
+#             line_arr = line.strip().split()
+#             if len(line_arr) >= 3:
+#                 img_path = osp.join(args.data_dir, line_arr[0].strip())
+#                 flow_path = osp.join(args.data_dir, line_arr[1].strip())
+#                 gt_path = osp.join(args.data_dir, line_arr[2].strip())
+                
+#                 # Ekstraksi absolut agar terhindar dari path '..' 
+#                 parts = img_path.replace('\\', '/').split('/')
+#                 try:
+#                     imgs_idx = parts.index('Imgs')
+#                     video_name = parts[imgs_idx - 1]
+#                     dataset_name = parts[imgs_idx - 3] # mundur 3: Imgs -> video -> test -> dataset
+#                 except ValueError:
+#                     video_name = parts[-2]
+#                     dataset_name = parts[-4] if len(parts) >= 4 else "Dataset"
+                
+#                 video_dict[(dataset_name, video_name)].append((img_path, flow_path, gt_path))
+#                 total_frames += 1
+
+#     print(f"📊 Menemukan {total_frames} frames dari {len(video_dict)} video unik.")
+
+#     model = net.GAPNet(arch=args.arch, pretrained=False)
+    
+#     if not osp.isfile(args.pretrained):
+#         print(f'❌ File pre-trained tidak ditemukan: {args.pretrained}')
+#         exit(-1)
+
+#     state_dict = torch.load(args.pretrained, map_location='cpu')
+#     if 'state_dict' in state_dict:
+#         state_dict = state_dict['state_dict']
+#     state_dict = {k[7:] if k.startswith('module.') else k: v for k, v in state_dict.items()}
+    
+#     model.load_state_dict(state_dict, strict=False)
+#     model = model.to(device)
+#     model.eval()
+
+#     # FLOPs & FPS
+#     dummy_img = torch.rand(1, 3, args.width, args.height).to(device)
+#     dummy_flow = torch.rand(1, 3, args.width, args.height).to(device)
+#     flops = FlopCountAnalysis(model, (dummy_img, dummy_flow))
+#     print(f"total flops: {flops.total()/1e9:.4f}G")
+
+#     print("⚡ Menguji kecepatan FPS (Batch Size 1)...")
+#     bs = 1
+#     with torch.no_grad():
+#         for _ in range(50): _ = model(dummy_img, dummy_flow)
+#         from time import time
+#         start_t = time()
+#         for _ in range(100): _ = model(dummy_img, dummy_flow)
+#         total_t = time() - start_t
+#     print(f"⏱️  Kecepatan: {100 / total_t * bs:.2f} FPS")
+
+#     # Testing & Evaluasi
+#     save_dir = osp.join(args.save_dir, args.method_tag)
+#     os.makedirs(save_dir, exist_ok=True)
+#     sm_g, fm_g, mae_g = test_and_evaluate(args, model, video_dict, save_dir)
+#     print(f'\n🎯 Hasil Akhir Global -> S_m: {sm_g:.4f}, F_max: {fm_g:.4f}, MAE: {mae_g:.4f}')
+    
+#     # ZIP
+#     zip_path = osp.join(args.save_dir, args.method_tag)
+#     print(f"📦 Mengompresi hasil prediksi dan CSV ke {zip_path}.zip ...")
+#     shutil.make_archive(zip_path, 'zip', save_dir)
+#     print("✅ Kompresi selesai!")
+
+# if __name__ == '__main__':
+#     parser = ArgumentParser()
+#     parser.add_argument('--arch', default='iformer_tiny')
+#     parser.add_argument('--data_dir', default="/kaggle/input/datasets/billydawson/vsod-skripsi-lst/")
+#     parser.add_argument('--width', type=int, default=384)
+#     parser.add_argument('--height', type=int, default=384)
+#     parser.add_argument('--gpu', default=True, type=lambda x: (str(x).lower() == 'true'))
+#     parser.add_argument('--pretrained', required=True)
+#     parser.add_argument('--dataset_name', default='DAVSOD_test')
+#     parser.add_argument('--save_dir', default='/kaggle/working/test_results')
+#     parser.add_argument('--method_tag', default='gapnet_iformer')
+#     args = parser.parse_args()
+
+#     device = torch.device('cuda') if args.gpu and torch.cuda.is_available() else torch.device('cpu')
+#     main(args)
     
 # import shutil
 # import torch
