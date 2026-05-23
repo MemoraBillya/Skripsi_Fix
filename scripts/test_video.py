@@ -24,34 +24,43 @@ def test_and_evaluate(args, model, video_dict, save_dir):
     SM_global = M.Smeasure()
     MAE_global = M.MAE()
 
-    # Dictionary untuk menyimpan metrik level video per dataset
+    # Dictionary untuk menyimpan evaluator level DATASET
+    dataset_evaluators = {}
+    
+    # Dictionary untuk menyimpan data CSV level video
     dataset_video_metrics = defaultdict(list)
 
     print("\n🚀 Memulai Proses Testing & Evaluasi...")
     for video_key, frames in tqdm(video_dict.items(), desc="Memproses Video"):
         dataset_name, video_name = video_key
         
-        # Setup direktori penyimpanan untuk gambar dan metrik
+        # Setup direktori
         vid_save_dir = osp.join(save_dir, dataset_name, video_name)
         os.makedirs(vid_save_dir, exist_ok=True)
         
         metrics_dir = osp.join(save_dir, "Metrics", dataset_name)
         per_frame_dir = osp.join(metrics_dir, "Per_Frame")
         os.makedirs(per_frame_dir, exist_ok=True)
+
+        # Inisialisasi Metrik Dataset (jika dataset baru)
+        if dataset_name not in dataset_evaluators:
+            dataset_evaluators[dataset_name] = {
+                'FM': M.Fmeasure(),
+                'SM': M.Smeasure(),
+                'MAE': M.MAE()
+            }
         
         # Inisialisasi Metrik Per-Video
         FM_vid = M.Fmeasure()
         SM_vid = M.Smeasure()
         MAE_vid = M.MAE()
         
-        # List untuk menyimpan data per frame khusus video ini
         frame_metrics_data = []
         
         for img_path, flow_path, label_path in frames:
             image = cv2.imread(img_path)
             flow = cv2.imread(flow_path)
             gt = cv2.imread(label_path, cv2.IMREAD_GRAYSCALE)
-            
             orig_shape = image.shape[:2]
             
             # Pre-processing
@@ -82,51 +91,48 @@ def test_and_evaluate(args, model, video_dict, save_dir):
             save_path = osp.join(vid_save_dir, frame_name)
             cv2.imwrite(save_path, pred_np)
             
-            # 1. Update Metrik Video & Global
+            # Update Metrik
             FM_vid.step(pred=pred_np, gt=gt)
             SM_vid.step(pred=pred_np, gt=gt)
             MAE_vid.step(pred=pred_np, gt=gt)
+            
+            dataset_evaluators[dataset_name]['FM'].step(pred=pred_np, gt=gt)
+            dataset_evaluators[dataset_name]['SM'].step(pred=pred_np, gt=gt)
+            dataset_evaluators[dataset_name]['MAE'].step(pred=pred_np, gt=gt)
             
             FM_global.step(pred=pred_np, gt=gt)
             SM_global.step(pred=pred_np, gt=gt)
             MAE_global.step(pred=pred_np, gt=gt)
             
-            # 2. Hitung Metrik KHUSUS untuk Frame ini saja
+            # Hitung Frame Individual
             FM_frame = M.Fmeasure()
             SM_frame = M.Smeasure()
             MAE_frame = M.MAE()
-            
             FM_frame.step(pred=pred_np, gt=gt)
             SM_frame.step(pred=pred_np, gt=gt)
             MAE_frame.step(pred=pred_np, gt=gt)
             
-            # Ekstrak nilai metrik dari frame tunggal
             f_max_f = FM_frame.get_results()['fm']['curve'].max()
             sm_f = SM_frame.get_results()['sm']
             mae_f = MAE_frame.get_results()['mae']
-            
             frame_metrics_data.append([frame_name, sm_f, f_max_f, mae_f])
             
-        # --- Selesai 1 Video ---
-        
-        # Simpan CSV Per Frame untuk video ini
+        # Simpan CSV Frame
         frame_csv_path = osp.join(per_frame_dir, f"{video_name}_frames.csv")
         with open(frame_csv_path, mode='w', newline='') as file:
             writer = csv.writer(file)
             writer.writerow(['Frame', 'S_m', 'F_max', 'MAE'])
             writer.writerows(frame_metrics_data)
         
-        # Catat Metrik Keseluruhan Video ini ke Dictionary Dataset
+        # Kumpulkan Metrik Video
         fm_v = FM_vid.get_results()['fm']['curve'].max()
         sm_v = SM_vid.get_results()['sm']
         mae_v = MAE_vid.get_results()['mae']
         dataset_video_metrics[dataset_name].append([video_name, sm_v, fm_v, mae_v])
 
-    # --- Selesai Semua Video ---
-
     print("\n💾 Menyimpan File CSV Metrik...")
     
-    # 1. Simpan CSV Video-Level per Dataset
+    # Simpan CSV Video per Dataset
     for d_name, v_metrics in dataset_video_metrics.items():
         dataset_csv_path = osp.join(save_dir, "Metrics", d_name, "video_metrics.csv")
         with open(dataset_csv_path, mode='w', newline='') as file:
@@ -134,16 +140,24 @@ def test_and_evaluate(args, model, video_dict, save_dir):
             writer.writerow(['Video', 'S_m', 'F_max', 'MAE'])
             writer.writerows(v_metrics)
 
-    # 2. Simpan CSV Global
-    fm_g = FM_global.get_results()['fm']['curve'].max()
-    sm_g = SM_global.get_results()['sm']
-    mae_g = MAE_global.get_results()['mae']
-    
-    global_csv_path = osp.join(save_dir, "Metrics", "global_metrics.csv")
-    with open(global_csv_path, mode='w', newline='') as file:
+    # REKAP DATASET & GLOBAL MENJADI SATU FILE
+    summary_csv_path = osp.join(save_dir, "Metrics", "dataset_and_global_summary.csv")
+    with open(summary_csv_path, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(['Dataset', 'S_m', 'F_max', 'MAE'])
-        writer.writerow(['ALL_DATASETS', sm_g, fm_g, mae_g])
+        
+        # Tulis Rata-rata Masing-masing Dataset
+        for d_name, evaluators in dataset_evaluators.items():
+            fm_d = evaluators['FM'].get_results()['fm']['curve'].max()
+            sm_d = evaluators['SM'].get_results()['sm']
+            mae_d = evaluators['MAE'].get_results()['mae']
+            writer.writerow([d_name, sm_d, fm_d, mae_d])
+        
+        # Tulis Rata-rata Global (Semua Dataset)
+        fm_g = FM_global.get_results()['fm']['curve'].max()
+        sm_g = SM_global.get_results()['sm']
+        mae_g = MAE_global.get_results()['mae']
+        writer.writerow(['ALL_DATASETS_GLOBAL', sm_g, fm_g, mae_g])
 
     return sm_g, fm_g, mae_g
 
