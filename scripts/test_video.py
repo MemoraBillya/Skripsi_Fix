@@ -24,33 +24,26 @@ def test_and_evaluate(args, model, video_dict, save_dir):
     SM_global = M.Smeasure()
     MAE_global = M.MAE()
 
-    # Dictionary untuk menyimpan evaluator level DATASET
     dataset_evaluators = {}
-    
-    # Dictionary untuk menyimpan data CSV level video
     dataset_video_metrics = defaultdict(list)
 
     print("\n🚀 Memulai Proses Testing & Evaluasi...")
     for video_key, frames in tqdm(video_dict.items(), desc="Memproses Video"):
         dataset_name, video_name = video_key
         
-        # Setup direktori
-        vid_save_dir = osp.join(save_dir, dataset_name, video_name)
+        # --- STRUKTUR FOLDER BARU YANG RAPI ---
+        # 1. Folder khusus gambar Mask (Saliency_Maps)
+        vid_save_dir = osp.join(save_dir, "Saliency_Maps", dataset_name, video_name)
         os.makedirs(vid_save_dir, exist_ok=True)
         
-        metrics_dir = osp.join(save_dir, "Metrics", dataset_name)
+        # 2. Folder khusus CSV Metrik (Metrics_CSV)
+        metrics_dir = osp.join(save_dir, "Metrics_CSV", dataset_name)
         per_frame_dir = osp.join(metrics_dir, "Per_Frame")
         os.makedirs(per_frame_dir, exist_ok=True)
 
-        # Inisialisasi Metrik Dataset (jika dataset baru)
         if dataset_name not in dataset_evaluators:
-            dataset_evaluators[dataset_name] = {
-                'FM': M.Fmeasure(),
-                'SM': M.Smeasure(),
-                'MAE': M.MAE()
-            }
+            dataset_evaluators[dataset_name] = {'FM': M.Fmeasure(), 'SM': M.Smeasure(), 'MAE': M.MAE()}
         
-        # Inisialisasi Metrik Per-Video
         FM_vid = M.Fmeasure()
         SM_vid = M.Smeasure()
         MAE_vid = M.MAE()
@@ -63,7 +56,6 @@ def test_and_evaluate(args, model, video_dict, save_dir):
             gt = cv2.imread(label_path, cv2.IMREAD_GRAYSCALE)
             orig_shape = image.shape[:2]
             
-            # Pre-processing
             img = cv2.resize(image, (args.width, args.height))
             flow_img = cv2.resize(flow, (args.width, args.height))
             
@@ -79,14 +71,13 @@ def test_and_evaluate(args, model, video_dict, save_dir):
             flow_img = flow_img[:, :, ::-1].copy().transpose((2, 0, 1))
             flow_var = torch.from_numpy(flow_img).unsqueeze(0).to(device)
             
-            # Prediksi
             preds = model(img_var, flow_var)
             pred_map = preds[:, 0, :, :].unsqueeze(1)
             
-            # Post-processing & Simpan Mask
             pred_map = F.interpolate(pred_map, size=orig_shape, mode='bilinear', align_corners=False)
             pred_np = (pred_map.squeeze().cpu().numpy() * 255).astype(np.uint8)
             
+            # --- SIMPAN GAMBAR MASK KE DALAM FOLDER SALIENCY_MAPS ---
             frame_name = osp.basename(img_path).replace('.jpg', '.png')
             save_path = osp.join(vid_save_dir, frame_name)
             cv2.imwrite(save_path, pred_np)
@@ -104,7 +95,6 @@ def test_and_evaluate(args, model, video_dict, save_dir):
             SM_global.step(pred=pred_np, gt=gt)
             MAE_global.step(pred=pred_np, gt=gt)
             
-            # Hitung Frame Individual
             FM_frame = M.Fmeasure()
             SM_frame = M.Smeasure()
             MAE_frame = M.MAE()
@@ -117,43 +107,35 @@ def test_and_evaluate(args, model, video_dict, save_dir):
             mae_f = MAE_frame.get_results()['mae']
             frame_metrics_data.append([frame_name, sm_f, f_max_f, mae_f])
             
-        # Simpan CSV Frame
         frame_csv_path = osp.join(per_frame_dir, f"{video_name}_frames.csv")
         with open(frame_csv_path, mode='w', newline='') as file:
             writer = csv.writer(file)
             writer.writerow(['Frame', 'S_m', 'F_max', 'MAE'])
             writer.writerows(frame_metrics_data)
         
-        # Kumpulkan Metrik Video
         fm_v = FM_vid.get_results()['fm']['curve'].max()
         sm_v = SM_vid.get_results()['sm']
         mae_v = MAE_vid.get_results()['mae']
         dataset_video_metrics[dataset_name].append([video_name, sm_v, fm_v, mae_v])
 
     print("\n💾 Menyimpan File CSV Metrik...")
-    
-    # Simpan CSV Video per Dataset
     for d_name, v_metrics in dataset_video_metrics.items():
-        dataset_csv_path = osp.join(save_dir, "Metrics", d_name, "video_metrics.csv")
+        dataset_csv_path = osp.join(save_dir, "Metrics_CSV", d_name, "video_metrics.csv")
         with open(dataset_csv_path, mode='w', newline='') as file:
             writer = csv.writer(file)
             writer.writerow(['Video', 'S_m', 'F_max', 'MAE'])
             writer.writerows(v_metrics)
 
-    # REKAP DATASET & GLOBAL MENJADI SATU FILE
-    summary_csv_path = osp.join(save_dir, "Metrics", "dataset_and_global_summary.csv")
+    summary_csv_path = osp.join(save_dir, "Metrics_CSV", "dataset_and_global_summary.csv")
     with open(summary_csv_path, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(['Dataset', 'S_m', 'F_max', 'MAE'])
-        
-        # Tulis Rata-rata Masing-masing Dataset
         for d_name, evaluators in dataset_evaluators.items():
             fm_d = evaluators['FM'].get_results()['fm']['curve'].max()
             sm_d = evaluators['SM'].get_results()['sm']
             mae_d = evaluators['MAE'].get_results()['mae']
             writer.writerow([d_name, sm_d, fm_d, mae_d])
         
-        # Tulis Rata-rata Global (Semua Dataset)
         fm_g = FM_global.get_results()['fm']['curve'].max()
         sm_g = SM_global.get_results()['sm']
         mae_g = MAE_global.get_results()['mae']
@@ -170,28 +152,30 @@ def main(args):
         for line in fid:
             line_arr = line.strip().split()
             if len(line_arr) >= 3:
-                img_path = osp.join(args.data_dir, line_arr[0].strip())
-                flow_path = osp.join(args.data_dir, line_arr[1].strip())
-                gt_path = osp.join(args.data_dir, line_arr[2].strip())
+                # Karena patch sudah membuat path absolut, kita langsung baca tanpa tambahan args.data_dir
+                img_path = line_arr[0].strip()
+                flow_path = line_arr[1].strip()
+                gt_path = line_arr[2].strip()
                 
+                # FIX LOGIKA: Gunakan argumen dataset_name secara eksplisit (Paling Aman)
+                dataset_name = args.dataset_name 
+                
+                # Ekstrak nama video dengan cerdas (ambil nama folder tepat di atas file gambar)
                 parts = img_path.replace('\\', '/').split('/')
-                try:
-                    imgs_idx = parts.index('Imgs')
-                    video_name = parts[imgs_idx - 1]
-                    dataset_name = parts[imgs_idx - 3] 
-                except ValueError:
+                if parts[-2] == 'Imgs':
+                    video_name = parts[-3]
+                else:
                     video_name = parts[-2]
-                    dataset_name = parts[-4] if len(parts) >= 4 else "Dataset"
                 
                 video_dict[(dataset_name, video_name)].append((img_path, flow_path, gt_path))
                 total_frames += 1
 
-    print(f"📊 Menemukan {total_frames} frames dari {len(video_dict)} video unik.")
+    print(f"📊 Menemukan {total_frames} frames dari {len(video_dict)} video unik pada dataset {args.dataset_name}.")
 
     model = net.GAPNet(arch=args.arch, pretrained=False)
     
     if not osp.isfile(args.pretrained):
-        print(f'File pre-trained tidak ditemukan: {args.pretrained}')
+        print(f'❌ File pre-trained tidak ditemukan: {args.pretrained}')
         exit(-1)
 
     state_dict = torch.load(args.pretrained, map_location='cpu')
@@ -207,7 +191,7 @@ def main(args):
     dummy_img = torch.rand(1, 3, args.width, args.height).to(device)
     dummy_flow = torch.rand(1, 3, args.width, args.height).to(device)
     flops = FlopCountAnalysis(model, (dummy_img, dummy_flow))
-    print(f"total flops: {flops.total()/1e9:.4f}G")
+    print(f"Total FLOPs: {flops.total()/1e9:.4f}G")
 
     print("Menguji kecepatan FPS (Batch Size 1)...")
     bs = 1
@@ -222,13 +206,16 @@ def main(args):
     save_dir = osp.join(args.save_dir, args.method_tag)
     os.makedirs(save_dir, exist_ok=True)
     sm_g, fm_g, mae_g = test_and_evaluate(args, model, video_dict, save_dir)
-    print(f'\n🎯 Hasil Akhir Global -> S_m: {sm_g:.4f}, F_max: {fm_g:.4f}, MAE: {mae_g:.4f}')
+    print(f'\n🎯 Hasil Akhir {args.dataset_name} -> S_m: {sm_g:.4f}, F_max: {fm_g:.4f}, MAE: {mae_g:.4f}')
     
-    # ZIP - Folder Metrics akan otomatis ikut ter-zip karena berada di dalam save_dir
+    # ZIP SEMUA ISI FOLDER SECARA BERSAMAAN
     zip_path = osp.join(args.save_dir, args.method_tag)
-    print(f" Mengompresi hasil prediksi dan CSV ke {zip_path}.zip ...")
+    print(f"\n📦 Mengompresi seluruh folder (Gambar Mask + CSV Metrik) ke {zip_path}.zip ...")
     shutil.make_archive(zip_path, 'zip', save_dir)
-    print(" Kompresi selesai! File zip ada di", zip_path + ".zip")
+    
+    # Bersihkan folder mentah setelah di-zip agar hemat disk
+    shutil.rmtree(save_dir)
+    print("✅ Kompresi selesai! Folder mentah dihapus untuk menghemat ruang. File zip siap diunduh!")
 
 if __name__ == '__main__':
     parser = ArgumentParser()
@@ -245,6 +232,7 @@ if __name__ == '__main__':
 
     device = torch.device('cuda') if args.gpu and torch.cuda.is_available() else torch.device('cpu')
     main(args)
+
 
 # import shutil
 # import torch
