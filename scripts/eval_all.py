@@ -133,7 +133,7 @@ def main():
     data_dir = '/kaggle/working/data/'
     
     # Folder tempat model 1-30 Anda berada (Bisa dibaca)
-    model_dir = '/kaggle/input/datasets/hellnawww/model-run-pertama-kali' 
+    model_dir = '/kaggle/input/datasets/hellnawww/mode-pertama' 
     
     # Folder tempat menyimpan hasil evaluasi (Harus di /working/ agar bisa ditulis)
     output_dir = '/kaggle/working/' 
