@@ -77,12 +77,7 @@ def main():
     
     # DAFTAR SEMUA FOLDER MODEL YANG INGIN DIEVALUASI
     model_dirs = [
-        '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs8lr1-7e-5',
-        '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs8lr1-7e-3',
-        '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs32lr1-7e-5',
-        '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs32lr1-7e-3',
-        '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs16lr1-7e-5',
-        '/kaggle/input/datasets/sejutakerinduan/mdl-img-bs16lr1-7e-3'
+        '/kaggle/input/datasets/hellnawww/mode-pertama'
     ]
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
