@@ -27,7 +27,7 @@ meningkatkan akurasi tanpa mengorbankan karakteristik lightweight, meskipun
 adaptasi temporal dan penanganan adegan kompleks, misalnya clutter dan kontras 
 rendah, memerlukan pengembangan lebih lanjut.
 
-Repositori penelitian ini dibangun dengan mengacu pada repositori Wu dkk. (2025), yang telah di-fork* dan dikembangkan lebih lanjut:
+Repositori penelitian ini dibangun dengan mengacu pada repositori Wu dkk. (2025), yang telah di-fork dan dikembangkan lebih lanjut:
 
 ```bibtex
 @article{wu2025gapnet,
