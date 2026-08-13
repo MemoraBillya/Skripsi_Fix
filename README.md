@@ -37,3 +37,13 @@ Repositori penelitian ini dibangun dengan mengacu pada repositori Wu dkk. (2025)
   year      = {2025},
 }
 ```
+
+<h3>Perbandingan Kualitatif Citra</h3>
+<div style="background-color:white; display:inline-block; padding:10px;">
+  <img src="Supp/Untitled design (18).png" alt="Perbandingan Kualitatif Citra" width="400"/>
+</div>
+
+<h3>Perbandingan Kualitatif Video</h3>
+<div style="background-color:white; display:inline-block; padding:10px;">
+  <img src="Supp/Citra.png" alt="Perbandingan Kualitatif Video" width="400"/>
+</div>
